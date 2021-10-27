@@ -1,7 +1,7 @@
 name: shelf_letsencrypt
 description: Let's Encrypt support for the shelf package (free and automatic HTTPS certificate support).
 version: 1.0.0
-homepage: https://www.example.com
+homepage: https://github.com/gmpassos/shelf_letsencrypt
 
 environment:
   sdk: '>=2.13.0 <3.0.0'
