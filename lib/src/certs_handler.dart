@@ -1,7 +1,9 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:basic_utils/basic_utils.dart';
+import 'package:collection/collection.dart';
 import 'package:path/path.dart' as pack_path;
 import 'package:shelf_letsencrypt/shelf_letsencrypt.dart';
 
@@ -40,7 +42,51 @@ abstract class CertificatesHandler {
   /// If this instance doesn't have a valid certificate for [domain] it will return `null`.
   ///
   /// See [LetsEncrypt.startSecureServer].
-  FutureOr<SecurityContext?> buildSecurityContext(String domain);
+  FutureOr<SecurityContext?> buildSecurityContext(List<String> domains,
+      {bool loadAllHandledDomains = true});
+
+  /// Returns a [List] of all the handled domains.
+  List<String> listAllHandledDomains({bool checkSecurityContext = true});
+
+  /// Returns `true` if [domain] certificate is already handled.
+  bool isHandledDomainCertificate(String domain,
+      {bool checkSecurityContext = true});
+
+  /// Returns a [List] of handled [domains].
+  List<String> listHandledDomains(List<String> domains,
+          {bool checkSecurityContext = true}) =>
+      domains
+          .where((d) => isHandledDomainCertificate(d,
+              checkSecurityContext: checkSecurityContext))
+          .toList();
+
+  /// Returns a [List] of NOT handled [domains].
+  List<String> listNotHandledDomains(List<String> domains,
+          {bool checkSecurityContext = true}) =>
+      domains
+          .where((d) => !isHandledDomainCertificate(d,
+              checkSecurityContext: checkSecurityContext))
+          .toList();
+
+  bool isCertificateExpired(String certificatePEM) {
+    try {
+      var pemList = splitPEMs(certificatePEM);
+
+      var certificate = X509Utils.x509CertificateFromPem(pemList.first);
+
+      var notBefore = certificate.validity.notBefore;
+      var notAfter = certificate.validity.notAfter;
+
+      var now = DateTime.now();
+
+      if (now.compareTo(notBefore) < 0) return true;
+      if (now.compareTo(notAfter) > 0) return true;
+
+      return false;
+    } catch (_) {
+      return true;
+    }
+  }
 
   /// Ensures that an account key pair exists.
   Future<PEMKeyPair> ensureAccountPEMKeyPair() async {
@@ -196,6 +242,119 @@ abstract class CertificatesHandler {
   }
 }
 
+/// A [SecurityContext] builder.
+class SecurityContextBuilder {
+  static bool defineMerged = false;
+
+  final Set<DomainCertificate> domainsCertificates = <DomainCertificate>{};
+
+  SecurityContext build() {
+    var securityContext = SecurityContext();
+
+    if (defineMerged) {
+      var allCerts =
+          domainsCertificates.reduce((value, element) => value.merge(element));
+      allCerts.define(securityContext);
+    } else {
+      for (var d in domainsCertificates) {
+        d.define(securityContext);
+      }
+    }
+
+    return securityContext;
+  }
+}
+
+/// Holds [domains] certificates to load into a [SecurityContext].
+abstract class DomainCertificate {
+  /// The domains of the certificates.
+  late final List<String> domains;
+
+  DomainCertificate(Iterable<String> domains) {
+    var domainsList = domains.toList().toSet().toList();
+    domainsList.sort();
+    this.domains = domainsList;
+  }
+
+  /// The full-chain certificates in PEM format.
+  String get fullChainPEM;
+
+  /// The private key certificates in PEM format.
+  String get privateKeyPEM;
+
+  /// Merge this instance with [other].
+  DomainCertificate merge(DomainCertificate other) {
+    var fullChain = fullChainPEM + '\n\n' + other.fullChainPEM;
+    var privateKey = privateKeyPEM + '\n\n' + other.privateKeyPEM;
+
+    return DomainCertificatePEM(
+        [...domains, ...other.domains], fullChain, privateKey);
+  }
+
+  /// Defines this certificates into [securityContext].
+  void define(SecurityContext securityContext);
+
+  static final ListEquality<String> _listEqualityString =
+      ListEquality<String>();
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is DomainCertificate &&
+          _listEqualityString.equals(domains, other.domains);
+
+  @override
+  int get hashCode => _listEqualityString.hash(domains);
+
+  @override
+  String toString() {
+    return 'DomainCertificate{domains: $domains}';
+  }
+}
+
+/// A [DomainCertificate] implementation using PEM content.
+class DomainCertificatePEM extends DomainCertificate {
+  @override
+  final String fullChainPEM;
+
+  @override
+  final String privateKeyPEM;
+
+  DomainCertificatePEM(
+      List<String> domains, this.fullChainPEM, this.privateKeyPEM)
+      : super(domains);
+
+  @override
+  void define(SecurityContext securityContext) {
+    securityContext.useCertificateChainBytes(utf8.encode(fullChainPEM));
+    securityContext.usePrivateKeyBytes(utf8.encode(privateKeyPEM));
+  }
+}
+
+/// A [DomainCertificate] implementation using file paths.
+class DomainCertificateFilePath extends DomainCertificate {
+  final String fullChainFilePath;
+
+  final String privateKeyFilePath;
+
+  DomainCertificateFilePath(
+      List<String> domains, this.fullChainFilePath, this.privateKeyFilePath)
+      : super(domains);
+
+  @override
+  String get fullChainPEM => File(fullChainFilePath).readAsStringSync();
+
+  @override
+  String get privateKeyPEM => File(privateKeyFilePath).readAsStringSync();
+
+  @override
+  void define(SecurityContext securityContext) {
+    securityContext.useCertificateChain(fullChainFilePath);
+    securityContext.usePrivateKey(privateKeyFilePath);
+  }
+}
+
+/// A [CertificatesHandler] implementation using [dart:io].
 class CertificatesHandlerIO extends CertificatesHandler {
   /// The [Directory] to storage certificates.
   final Directory directory;
@@ -218,24 +377,126 @@ class CertificatesHandlerIO extends CertificatesHandler {
   }
 
   @override
-  FutureOr<SecurityContext?> buildSecurityContext(String domain) {
+  List<String> listAllHandledDomains({bool checkSecurityContext = true}) {
+    var domainsDirs = directory
+        .listSync(recursive: false)
+        .where((e) => _isDomainDirectory(e))
+        .map((e) => _pathFileName(e.path))
+        .where((e) => isHandledDomainCertificate(e,
+            checkSecurityContext: checkSecurityContext))
+        .toList();
+
+    return domainsDirs;
+  }
+
+  bool _isDomainDirectory(FileSystemEntity e) {
+    if (e.statSync().type != FileSystemEntityType.directory) return false;
+
+    var dirName = _pathFileName(e.path);
+
+    if (dirName == accountDirectory || dirName.startsWith('.')) {
+      return false;
+    }
+
+    var dir = Directory(e.path);
+
+    var files = dir.listSync(recursive: false, followLinks: false);
+    var pemFiles = files.where((f) => f.path.endsWith('pem')).toList();
+
+    if (pemFiles.isEmpty) return false;
+
+    var fullChainFile =
+        pemFiles.firstWhereOrNull((f) => f.path.endsWith(fullChainPEMFileName));
+
+    if (fullChainFile == null) return false;
+
+    var privateKeyFile = pemFiles
+        .firstWhereOrNull((f) => f.path.endsWith(privateKeyPEMFileName));
+
+    if (privateKeyFile == null) return false;
+
+    return true;
+  }
+
+  String _pathFileName(String path) => pack_path.split(path).last;
+
+  @override
+  Future<SecurityContext?> buildSecurityContext(List<String> domains,
+      {bool loadAllHandledDomains = true}) async {
+    var securityContextBuilder = SecurityContextBuilder();
+
+    for (var domain in domains) {
+      var domainOk =
+          await _useDomainCertificate(securityContextBuilder, domain);
+      if (!domainOk) return null;
+    }
+
+    if (loadAllHandledDomains) {
+      var handledDomains = listAllHandledDomains();
+
+      for (var d in handledDomains) {
+        if (!domains.contains(d)) {
+          await _useDomainCertificate(securityContextBuilder, d);
+        }
+      }
+    }
+
+    var securityContext = securityContextBuilder.build();
+    return securityContext;
+  }
+
+  Future<bool> _useDomainCertificate(
+      SecurityContextBuilder securityContextBuilder, String domain) async {
     var fullChainFile = fileDomainFullChainPEM(domain);
     var privateKeyFile = fileDomainPrivateKeyPEM(domain);
 
     if (!_fileExistsWithContent(fullChainFile) ||
         !_fileExistsWithContent(privateKeyFile)) {
-      return null;
+      return false;
     }
 
     var fullChainPath = fullChainFile.path;
     var privateKeyPath = privateKeyFile.path;
 
-    var securityContext = SecurityContext();
+    securityContextBuilder.domainsCertificates.add(
+        DomainCertificateFilePath([domain], fullChainPath, privateKeyPath));
 
-    securityContext.useCertificateChain(fullChainPath);
-    securityContext.usePrivateKey(privateKeyPath);
+    return true;
+  }
 
-    return securityContext;
+  @override
+  bool isHandledDomainCertificate(String domain,
+      {bool checkSecurityContext = true}) {
+    var fullChainFile = fileDomainFullChainPEM(domain);
+    var privateKeyFile = fileDomainPrivateKeyPEM(domain);
+
+    if (!_fileExistsWithContent(fullChainFile) ||
+        !_fileExistsWithContent(privateKeyFile)) {
+      return false;
+    }
+
+    var certificateExpired =
+        isCertificateExpired(fullChainFile.readAsStringSync());
+    if (certificateExpired) {
+      return false;
+    }
+
+    if (!checkSecurityContext) {
+      return true;
+    }
+
+    try {
+      var fullChainPath = fullChainFile.path;
+      var privateKeyPath = privateKeyFile.path;
+
+      var securityContext = SecurityContext();
+      securityContext.useCertificateChain(fullChainPath);
+      securityContext.usePrivateKey(privateKeyPath);
+
+      return true;
+    } catch (_) {
+      return false;
+    }
   }
 
   File fileAccountPrivateKeyPEM() => File(
@@ -376,6 +637,11 @@ class CertificatesHandlerIO extends CertificatesHandler {
     filePrivateKey.writeAsStringSync(fullChainPEM);
 
     return true;
+  }
+
+  @override
+  String toString() {
+    return 'CertificatesHandlerIO@$directory';
   }
 }
 

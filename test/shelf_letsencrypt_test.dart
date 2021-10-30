@@ -23,7 +23,7 @@ void main() {
 
       expect(await certificatesHandler.getAccountPEMKeyPair(), isNull);
       expect(await certificatesHandler.getDomainPEMKeyPair(domain), isNull);
-      expect(await certificatesHandler.buildSecurityContext(domain), isNull);
+      expect(await certificatesHandler.buildSecurityContext([domain]), isNull);
 
       var accountPEMKeyPair =
           await certificatesHandler.ensureAccountPEMKeyPair();
@@ -128,8 +128,7 @@ void main() {
       try {
         await letsEncrypt.startSecureServer(
           (request) => Response.ok('Requested: ${request.requestedUri}'),
-          'localhost',
-          'contact@localhost',
+          {'localhost': 'contact@localhost'},
           port: 9180,
           securePort: 9143,
           checkCertificate: true,

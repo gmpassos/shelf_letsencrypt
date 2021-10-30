@@ -15,7 +15,7 @@ class LetsEncrypt {
   /// Usually a path starting with: `/.well-known/`
   static bool isACMEPath(String path) => path.startsWith('/.well-known/');
 
-  /// The certficate handler to use.
+  /// The certificate handler to use.
   final CertificatesHandler certificatesHandler;
 
   /// If `true` uses production API.
@@ -222,7 +222,8 @@ class LetsEncrypt {
 
     var challengeToken = getChallengeToken(cn);
 
-    _logMsg('Processing ACME challenge> cn: $cn ; token: $challengeToken');
+    _logMsg(
+        'Processing ACME challenge> cn: $cn ; token: $challengeToken > ${request.requestedUri}');
 
     if (challengeToken == null) {
       return Response.notFound('No ACME challenge token!');
@@ -235,7 +236,7 @@ class LetsEncrypt {
   ///
   /// - If [checkCertificate] is `true` will check the current certificate.
   Future<List<HttpServer>> startSecureServer(
-      Handler handler, String domain, String domainEmail,
+      Handler handler, Map<String, String> domainsAndEmails,
       {int port = 80,
       int securePort = 443,
       bindingAddress = '0.0.0.0',
@@ -243,10 +244,12 @@ class LetsEncrypt {
       bool shared = false,
       bool checkCertificate = true,
       bool requestCertificate = true,
-      bool forceRequestCertificate = false}) async {
+      bool forceRequestCertificate = false,
+      bool loadAllHandledDomains = false}) async {
     _logMsg('Starting server: $bindingAddress:$port');
 
-    _logMsg('Starting server: $domain ; port: $port');
+    _logMsg(
+        'Starting server> port: $port ; domainAndEmails: $domainsAndEmails');
 
     FutureOr<Response> handlerWithChallenge(r) {
       if (LetsEncrypt.isACMEPath(r.requestedUri.path)) {
@@ -266,8 +269,17 @@ class LetsEncrypt {
 
     HttpServer? secureServer;
 
-    var securityContext =
-        await certificatesHandler.buildSecurityContext(domain);
+    var domains = domainsAndEmails.keys.toList();
+
+    _logMsg('$certificatesHandler');
+    _logMsg('Handled domains: ${certificatesHandler.listAllHandledDomains()}');
+
+    var securityContext = await certificatesHandler.buildSecurityContext(
+        domains,
+        loadAllHandledDomains: loadAllHandledDomains);
+
+    _logMsg(
+        'securityContext[loadAllHandledDomains: $loadAllHandledDomains]: $securityContext');
 
     if (securityContext == null) {
       if (!requestCertificate) {
@@ -275,48 +287,66 @@ class LetsEncrypt {
             "No previous SecureContext! Can't request certificate");
       }
 
-      _logMsg('Requesting certificate for: $domain');
-      var ok = await this.requestCertificate(domain, domainEmail);
-      if (!ok) {
-        throw StateError("Error requesting certificate!");
+      var domainsToCheck = certificatesHandler.listNotHandledDomains(domains);
+
+      _logMsg('Requesting certificate for: $domainsToCheck');
+
+      for (var domain in domainsToCheck) {
+        var domainEmail = domainsAndEmails[domain]!;
+        var ok = await this.requestCertificate(domain, domainEmail);
+        if (!ok) {
+          throw StateError("Error requesting certificate!");
+        }
       }
 
-      securityContext = await certificatesHandler.buildSecurityContext(domain);
+      securityContext = await certificatesHandler.buildSecurityContext(domains,
+          loadAllHandledDomains: loadAllHandledDomains);
       if (securityContext == null) {
         throw StateError(
-            "Error loading SecureContext after successful request of certificate for: $domain");
+            "Error loading SecureContext after successful request of certificate for: $domains");
       }
 
-      _logMsg('Starting secure server: $domain ; port: $securePort');
+      _logMsg('Starting secure server> port: $securePort ; domains: $domains');
       secureServer = await _startSecureServer(securityContext);
     } else {
       secureServer = await _startSecureServer(securityContext);
 
       if (checkCertificate) {
-        _logMsg('Checking certificate for: $domain');
+        _logMsg('Checking certificate for: $domains');
 
-        var checkCertificateStatus = await this.checkCertificate(
-            domain, domainEmail,
-            requestCertificate: requestCertificate,
-            forceRequestCertificate: forceRequestCertificate);
+        var refreshedCertificate = false;
 
-        _logMsg('CheckCertificateStatus: $checkCertificateStatus');
+        for (var domain in domains) {
+          var domainEmail = domainsAndEmails[domain]!;
 
-        if (checkCertificateStatus.isOkRefreshed) {
+          var checkCertificateStatus = await this.checkCertificate(
+              domain, domainEmail,
+              requestCertificate: requestCertificate,
+              forceRequestCertificate: forceRequestCertificate);
+
+          _logMsg('CheckCertificateStatus: $checkCertificateStatus');
+
+          if (checkCertificateStatus.isOkRefreshed) {
+            refreshedCertificate = true;
+          } else if (checkCertificateStatus.isNotOK) {
+            throw StateError(
+                "Certificate check error! Status: $checkCertificateStatus ; domain: $domain");
+          }
+        }
+
+        if (refreshedCertificate) {
           _logMsg('Refreshing SecureContext due new certificate.');
-          securityContext =
-              await certificatesHandler.buildSecurityContext(domain);
+          securityContext = await certificatesHandler.buildSecurityContext(
+              domains,
+              loadAllHandledDomains: loadAllHandledDomains);
           if (securityContext == null) {
             throw StateError(
-                "Error loading SecureContext after successful certificate check for: $domain");
+                "Error loading SecureContext after successful certificate check for: $domains");
           }
 
           _logMsg('Restarting secure server...');
           await secureServer.close(force: true);
           secureServer = await _startSecureServer(securityContext);
-        } else if (checkCertificateStatus.isNotOK) {
-          throw StateError(
-              "Certificate check error! Status: $checkCertificateStatus ; domain: $domain");
         }
       }
     }

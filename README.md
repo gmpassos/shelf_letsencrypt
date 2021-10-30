@@ -46,10 +46,9 @@ void main(List<String> args) async {
 
   var servers = await letsEncrypt.startSecureServer(
     handler,
-    domain,
-    domainEmail,
+    {domain: domainEmail},
     port: 80,
-    securePort: 8443,
+    securePort: 443,
   );
 
   var server = servers[0]; // HTTP Server.
