@@ -10,10 +10,18 @@ import 'certs_handler.dart';
 
 /// Let's Encrypt certificate tool.
 class LetsEncrypt {
+  /// Returns `true` if [path] starts with `/.well-known/`.
+  static bool isWellknownPath(String path) => path.startsWith('/.well-known/');
+
   /// Returns `true` if [path] is an `ACME` request path.
   ///
   /// Usually a path starting with: `/.well-known/`
-  static bool isACMEPath(String path) => path.startsWith('/.well-known/');
+  static bool isACMEPath(String path) =>
+      path.startsWith('/.well-known/acme-challenge/');
+
+  /// Returns `true` if [path] is a self check path.
+  static bool isSelfCheckPath(String path) =>
+      path.startsWith('/.well-known/check/');
 
   /// The certificate handler to use.
   final CertificatesHandler certificatesHandler;
@@ -213,6 +221,13 @@ class LetsEncrypt {
     return match;
   }
 
+  /// A helper method to process a self check [Request].
+  ///
+  /// See [isSelfCheckPath].
+  Response processSelfCheckRequest(Request request) {
+    return Response.ok('OK');
+  }
+
   /// A helper method to process an ACME `shelf` [Request].
   ///
   /// See [isACMEPath].
@@ -252,18 +267,24 @@ class LetsEncrypt {
         'Starting server> port: $port ; domainAndEmails: $domainsAndEmails');
 
     FutureOr<Response> handlerWithChallenge(r) {
-      if (LetsEncrypt.isACMEPath(r.requestedUri.path)) {
-        return processACMEChallengeRequest(r);
-      } else {
-        return handler(r);
+      final path = r.requestedUri.path;
+
+      if (LetsEncrypt.isSelfCheckPath(path)) {
+        if (LetsEncrypt.isACMEPath(path)) {
+          return processACMEChallengeRequest(r);
+        } else if (LetsEncrypt.isSelfCheckPath(path)) {
+          return processSelfCheckRequest(r);
+        }
       }
+
+      return handler(r);
     }
 
     var server = await serve(handlerWithChallenge, bindingAddress, port,
         backlog: backlog, shared: shared);
 
     Future<HttpServer> startSecureServer(SecurityContext securityContext) {
-      return serve(handler, bindingAddress, securePort,
+      return serve(handlerWithChallenge, bindingAddress, securePort,
           securityContext: securityContext, backlog: backlog, shared: shared);
     }
 
@@ -412,7 +433,8 @@ class LetsEncrypt {
       retryInterval = Duration(milliseconds: 10);
     }
 
-    var domainURL = Uri.parse('https://$domain/');
+    var domainURL =
+        Uri.parse('https://$domain/.well-known/check/${DateTime.now()}');
 
     for (var i = 0; i < maxRetries; ++i) {
       if (i > 0) {

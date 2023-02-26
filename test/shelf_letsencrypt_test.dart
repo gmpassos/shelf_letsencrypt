@@ -92,7 +92,16 @@ void main() {
           LetsEncrypt.isACMEPath(
               '/.well-known/acme-challenge/Y73s3McbchxLs_NklRfW6HebjYrBmbVeKm0c9jbn3QI'),
           isTrue);
+
+      expect(
+          LetsEncrypt.isWellknownPath(
+              '/.well-known/acme-challenge/Y73s3McbchxLs_NklRfW6HebjYrBmbVeKm0c9jbn3QI'),
+          isTrue);
+
+      expect(LetsEncrypt.isACMEPath('/.well-known/foo/123'), isFalse);
+
       expect(LetsEncrypt.isACMEPath('/well-known/'), isFalse);
+      expect(LetsEncrypt.isWellknownPath('/well-known/'), isFalse);
       expect(LetsEncrypt.isACMEPath('/any/path'), isFalse);
 
       {
@@ -113,6 +122,31 @@ void main() {
         // No challenge token expected:
         var response = letsEncrypt.processACMEChallengeRequest(request);
         expect(response.statusCode, equals(404));
+      }
+    });
+
+    test('Self check path', () async {
+      var certificatesHandler = CertificatesHandlerIO(
+          Directory(pack_path.join(tmpDir.path, 'certs-3')));
+
+      var letsEncrypt = LetsEncrypt(certificatesHandler);
+
+      expect(
+          LetsEncrypt.isWellknownPath('/.well-known/check/123456789'), isTrue);
+
+      expect(
+          LetsEncrypt.isSelfCheckPath('/.well-known/check/123456789'), isTrue);
+
+      expect(LetsEncrypt.isSelfCheckPath('/well-known/'), isFalse);
+      expect(LetsEncrypt.isWellknownPath('/well-known/'), isFalse);
+      expect(LetsEncrypt.isSelfCheckPath('/any/path'), isFalse);
+
+      {
+        var uri = Uri.parse('http://foo.com/.well-known/check/123456789');
+        var request = Request('GET', uri, headers: {'host': 'foo.com'});
+
+        var response = letsEncrypt.processSelfCheckRequest(request);
+        expect(response.statusCode, equals(200));
       }
     });
 
