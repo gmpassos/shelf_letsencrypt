@@ -195,7 +195,7 @@ abstract class CertificatesHandler {
       return '\n$s\n';
     });
 
-    pem = pem.trim() + '\n';
+    pem = '${pem.trim()}\n';
 
     return pem;
   }
@@ -236,7 +236,7 @@ abstract class CertificatesHandler {
     pemList = pemList.map(CertificatesHandler.fixPEM).toList();
 
     var fullChainPEM =
-        pemList.join('\n\n').replaceAll(RegExp('\n\n+'), '\n\n').trim() + '\n';
+        '${pemList.join('\n\n').replaceAll(RegExp('\n\n+'), '\n\n').trim()}\n';
 
     return fullChainPEM;
   }
@@ -284,8 +284,8 @@ abstract class DomainCertificate {
 
   /// Merge this instance with [other].
   DomainCertificate merge(DomainCertificate other) {
-    var fullChain = fullChainPEM + '\n\n' + other.fullChainPEM;
-    var privateKey = privateKeyPEM + '\n\n' + other.privateKeyPEM;
+    var fullChain = '$fullChainPEM\n\n${other.fullChainPEM}';
+    var privateKey = '$privateKeyPEM\n\n${other.privateKeyPEM}';
 
     return DomainCertificatePEM(
         [...domains, ...other.domains], fullChain, privateKey);

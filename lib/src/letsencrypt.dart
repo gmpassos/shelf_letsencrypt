@@ -196,10 +196,10 @@ class LetsEncrypt {
         var schema = url.substring(0, idx);
         var rest = url.substring(idx);
         rest = rest.replaceFirst(RegExp(r'^/+'), '');
-        url = '$schema://' + rest.replaceAll('//', '/');
+        url = '$schema://${rest.replaceAll('//', '/')}';
       } else {
         var rest = url.replaceFirst(RegExp(r'^/+'), '');
-        url = 'http://' + rest.replaceAll('//', '/');
+        url = 'http://${rest.replaceAll('//', '/')}';
       }
     }
 
@@ -262,7 +262,7 @@ class LetsEncrypt {
     var server = await serve(handlerWithChallenge, bindingAddress, port,
         backlog: backlog, shared: shared);
 
-    Future<HttpServer> _startSecureServer(SecurityContext securityContext) {
+    Future<HttpServer> startSecureServer(SecurityContext securityContext) {
       return serve(handler, bindingAddress, securePort,
           securityContext: securityContext, backlog: backlog, shared: shared);
     }
@@ -307,9 +307,9 @@ class LetsEncrypt {
       }
 
       _logMsg('Starting secure server> port: $securePort ; domains: $domains');
-      secureServer = await _startSecureServer(securityContext);
+      secureServer = await startSecureServer(securityContext);
     } else {
-      secureServer = await _startSecureServer(securityContext);
+      secureServer = await startSecureServer(securityContext);
 
       if (checkCertificate) {
         _logMsg('Checking certificate for: $domains');
@@ -346,7 +346,7 @@ class LetsEncrypt {
 
           _logMsg('Restarting secure server...');
           await secureServer.close(force: true);
-          secureServer = await _startSecureServer(securityContext);
+          secureServer = await startSecureServer(securityContext);
         }
       }
     }

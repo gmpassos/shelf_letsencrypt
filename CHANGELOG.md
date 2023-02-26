@@ -1,3 +1,17 @@
+## 1.0.2
+
+- `README.md`: fix Dart CI badge
+- Fix lints.
+- path: ^1.8.3
+- shelf: ^1.4.0
+- acme_client: ^1.1.0
+- basic_utils: ^3.9.4
+- coverage: ^1.6.3
+- collection: ^1.16.0
+- lints: ^2.0.1
+- test: ^1.23.1
+- dependency_validator: ^3.2.2
+
 ## 1.0.1
 
 - Added support for multiple domains certificates in the same HTTPS server.
