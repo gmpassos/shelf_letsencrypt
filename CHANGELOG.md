@@ -1,4 +1,4 @@
-## 1.0.2
+## 1.1.0
 
 - `README.md`: fix Dart CI badge
 - Update Dart CI.
