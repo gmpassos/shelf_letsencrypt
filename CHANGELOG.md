@@ -1,6 +1,7 @@
 ## 1.0.2
 
 - `README.md`: fix Dart CI badge
+- Update Dart CI.
 - Fix lints.
 - path: ^1.8.3
 - shelf: ^1.4.0
