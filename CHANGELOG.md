@@ -1,3 +1,8 @@
+## 1.1.1
+
+- Self check URL now handled by `shelf_letsencrypt`:
+  - Using path: `/.well-known/check/`
+
 ## 1.1.0
 
 - `README.md`: fix Dart CI badge
