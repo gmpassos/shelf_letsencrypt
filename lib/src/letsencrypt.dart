@@ -213,7 +213,14 @@ class LetsEncrypt {
 
     _logMsg('Self test URL: $url');
 
-    var content = await getURL(Uri.parse(url));
+    String? content;
+    try {
+      content = await getURL(Uri.parse(url));
+    } catch (e, s) {
+      _logMsg(e, s);
+      _logMsg("Self test request error for URL: $url");
+      return false;
+    }
 
     if (content == null || content.isEmpty) {
       _logMsg('Self test: EMPTY');
@@ -402,8 +409,8 @@ class LetsEncrypt {
       return ok
           ? CheckCertificateStatus.okRefreshed
           : CheckCertificateStatus.error;
-    } catch (e) {
-      _logMsg(e);
+    } catch (e, s) {
+      _logMsg(e, s);
       return CheckCertificateStatus.error;
     }
   }
