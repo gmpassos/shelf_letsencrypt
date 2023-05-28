@@ -216,10 +216,14 @@ class LetsEncrypt {
     var content = await getURL(Uri.parse(url));
 
     if (content == null || content.isEmpty) {
+      _logMsg('Self test: EMPTY');
       return false;
     }
 
     var match = content.trim() == challengeData.fileContent;
+
+    _logMsg('Self test: ${match ? 'OK' : 'ERROR <$content>'}');
+
     return match;
   }
 
