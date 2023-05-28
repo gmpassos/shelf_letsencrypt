@@ -11,7 +11,10 @@ import 'certs_handler.dart';
 /// Let's Encrypt certificate tool.
 class LetsEncrypt {
   /// Returns `true` if [path] starts with `/.well-known/`.
-  static bool isWellknownPath(String path) => path.startsWith('/.well-known/');
+  static bool isWellKnownPath(String path) => path.startsWith('/.well-known/');
+
+  @Deprecated("Use `isWellKnownPath`")
+  static bool isWellknownPath(String path) => isWellKnownPath(path);
 
   /// Returns `true` if [path] is an `ACME` request path.
   ///
@@ -219,6 +222,7 @@ class LetsEncrypt {
     } catch (e, s) {
       _logMsg(e, s);
       _logMsg("Self test request error for URL: $url");
+      await Future.delayed(Duration(minutes: 10));
       return false;
     }
 
@@ -282,7 +286,7 @@ class LetsEncrypt {
     FutureOr<Response> handlerWithChallenge(r) {
       final path = r.requestedUri.path;
 
-      if (LetsEncrypt.isSelfCheckPath(path)) {
+      if (LetsEncrypt.isWellKnownPath(path)) {
         if (LetsEncrypt.isACMEPath(path)) {
           return processACMEChallengeRequest(r);
         } else if (LetsEncrypt.isSelfCheckPath(path)) {

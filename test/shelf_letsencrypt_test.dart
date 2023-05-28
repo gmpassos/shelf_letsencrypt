@@ -94,14 +94,14 @@ void main() {
           isTrue);
 
       expect(
-          LetsEncrypt.isWellknownPath(
+          LetsEncrypt.isWellKnownPath(
               '/.well-known/acme-challenge/Y73s3McbchxLs_NklRfW6HebjYrBmbVeKm0c9jbn3QI'),
           isTrue);
 
       expect(LetsEncrypt.isACMEPath('/.well-known/foo/123'), isFalse);
 
       expect(LetsEncrypt.isACMEPath('/well-known/'), isFalse);
-      expect(LetsEncrypt.isWellknownPath('/well-known/'), isFalse);
+      expect(LetsEncrypt.isWellKnownPath('/well-known/'), isFalse);
       expect(LetsEncrypt.isACMEPath('/any/path'), isFalse);
 
       {
@@ -132,13 +132,13 @@ void main() {
       var letsEncrypt = LetsEncrypt(certificatesHandler);
 
       expect(
-          LetsEncrypt.isWellknownPath('/.well-known/check/123456789'), isTrue);
+          LetsEncrypt.isWellKnownPath('/.well-known/check/123456789'), isTrue);
 
       expect(
           LetsEncrypt.isSelfCheckPath('/.well-known/check/123456789'), isTrue);
 
       expect(LetsEncrypt.isSelfCheckPath('/well-known/'), isFalse);
-      expect(LetsEncrypt.isWellknownPath('/well-known/'), isFalse);
+      expect(LetsEncrypt.isWellKnownPath('/well-known/'), isFalse);
       expect(LetsEncrypt.isSelfCheckPath('/any/path'), isFalse);
 
       {

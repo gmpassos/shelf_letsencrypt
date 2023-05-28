@@ -1,5 +1,7 @@
 ## 1.2.0
 
+- `LetsEncrypt`:
+  - Rename `isWellknownPath` to `isWellKnownPath```
 - sdk: '>=3.0.0 <4.0.0'
 - shelf: ^1.4.1
 - collection: ^1.17.1
