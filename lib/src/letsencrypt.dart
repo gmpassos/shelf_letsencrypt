@@ -222,7 +222,6 @@ class LetsEncrypt {
     } catch (e, s) {
       _logMsg(e, s);
       _logMsg("Self test request error for URL: $url");
-      await Future.delayed(Duration(minutes: 10));
       return false;
     }
 
