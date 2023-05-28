@@ -113,7 +113,7 @@ class LetsEncrypt {
 
     _challengesTokens[cn] = challengeData.fileContent;
 
-    _logMsg('Self test challenge...');
+    _logMsg('Self test challenge... ${challengeData.toJson()}');
 
     var selfTestOK = await _selfChallengeTest(client, challengeData);
     if (!selfTestOK) {
@@ -210,6 +210,8 @@ class LetsEncrypt {
         url = 'http://${rest.replaceAll('//', '/')}';
       }
     }
+
+    _logMsg('Self test URL: $url');
 
     var content = await getURL(Uri.parse(url));
 

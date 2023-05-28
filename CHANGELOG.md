@@ -1,3 +1,11 @@
+## 1.1.2
+
+- sdk: '>=3.0.0 <4.0.0'
+- shelf: ^1.4.1
+- collection: ^1.17.1
+- lints: ^2.1.0
+- test: ^1.24.1
+
 ## 1.1.1
 
 - Self check URL now handled by `shelf_letsencrypt`:
