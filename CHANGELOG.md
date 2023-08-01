@@ -1,3 +1,11 @@
+## 1.2.1
+
+- acme_client: ^1.2.0
+- basic_utils: ^5.6.1
+- collection: ^1.18.0
+- lints: ^2.1.1
+- test: ^1.24.4
+
 ## 1.2.0
 
 - `LetsEncrypt`:

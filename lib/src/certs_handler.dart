@@ -74,8 +74,13 @@ abstract class CertificatesHandler {
 
       var certificate = X509Utils.x509CertificateFromPem(pemList.first);
 
-      var notBefore = certificate.validity.notBefore;
-      var notAfter = certificate.validity.notAfter;
+      var tbsCertificateValidity = certificate.tbsCertificate?.validity;
+      if (tbsCertificateValidity == null) {
+        return false;
+      }
+
+      var notBefore = tbsCertificateValidity.notBefore;
+      var notAfter = tbsCertificateValidity.notAfter;
 
       var now = DateTime.now();
 
