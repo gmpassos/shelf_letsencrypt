@@ -1,3 +1,15 @@
+## 1.2.2
+
+- `LetsEncrypt`:
+  - Added feild `minCertificateValidityTime`.
+    - `isDomainHttpsOK` now checks the certificate for short validity period,
+      allowing to refresh the certificate before it really expires (5 days before as default).
+  - Field `log`: improve logging parameters.
+  - Improve logging messages.
+- Dart CI: update and optimize jobs.
+
+- test: ^1.24.6
+
 ## 1.2.1
 
 - acme_client: ^1.2.0
