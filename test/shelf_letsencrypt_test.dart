@@ -177,7 +177,7 @@ void main() {
       expect(
           error?.message,
           allOf(contains('No previous SecureContext'),
-              contains("Can't request")));
+              contains("can't request")));
     });
 
     tearDown(() {
