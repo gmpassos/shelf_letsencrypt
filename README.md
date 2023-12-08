@@ -17,7 +17,65 @@
 
 [letsencrypt]: https://letsencrypt.org/
 
-## Usage
+# Developing with shelf_letsencrypt
+LetsEncrypt provide a few challenges for your development enviroment. 
+Read on for a few hints.
+
+## A word of caution
+LetsEncrypt rate limits the issuing of production certificates.
+It is very easy to get locked out of letsencrypt for an extended period of time (days)
+leaving you in the situation where you can't issue a production certificate.
+
+CRITICAL: you could end up with your production systems down for days!!!!
+
+I would advise you to read up on the Lets Encrypt rate limits:
+
+https://letsencrypt.org/docs/rate-limits/
+
+To avoid this (potentially) major issue make certain that you test with a STAGING
+certificate.
+
+
+You do this by passing in 'production: false' (the default) when creating
+the LetsEncrypt certificate.
+Staging certificates still have rate limits but they are much more generours
+
+```dart 
+final LetsEncrypt letsEncrypt = LetsEncrypt(certificatesHandler, production: false);
+```
+
+
+## Permissions
+On Linux you need to be root (sudo) to open a port below 1024. If you try
+to start your server with the default ports (80, 443) you will fail.
+
+
+## NAT for your Development environment
+To issue a certificate LetsEncrypt needs to be able to connect to your
+webserver on port 80.
+This will work fine in production (with the write firewall rules) but in 
+a development environment can be a bit tricky.
+
+The above Permission limitations add to the complication. 
+
+The easist way to do this is (for dev):
+1) start your server on ports 8080 and 8443 (or any pair above 1024)
+2) set up two NATS on your router that forward ports to your dev machine.
+   80 -> 8080
+   443 -> 8443
+
+
+## DNS for development
+For Lets Encrypt to issue a certificate it must be able to resolve the domain
+name of the certificate that you are requesting.
+
+To avoid tampering with your production DNS I keep a cheap domain name that I 
+use in test. 
+I then use cloudflare's free DNS hosting service to host the domain name which
+allows me to add the necessary A record which points to my WFH router on which
+I've configured the above NAT.
+
+# Usage
 
 To use the `LetsEncrypt` class
 
