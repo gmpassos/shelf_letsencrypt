@@ -50,8 +50,8 @@ void main(List<String> args) async {
   print('Serving at https://${serverSecure.address.host}:${serverSecure.port}');
 }
 
-/// splits the command line arguments into a list of domains
-/// and domain email addresses.
+/// splits the command line arguments into a list of [Domain]s
+/// containing the domain name and and domain email addresses.
 List<Domain> _extractDomainsFromArgs(
     String domainsArg, String domainsEmailArg) {
   final domainDelimiter = RegExp(r'\s*[;:,]\s*');
