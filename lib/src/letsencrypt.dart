@@ -7,6 +7,7 @@ import 'dart:io';
 import 'package:acme_client/acme_client.dart';
 import 'package:shelf/shelf.dart';
 import 'package:shelf/shelf_io.dart';
+import 'package:shelf_letsencrypt/src/check_certificate_status.dart';
 
 import 'certs_handler.dart';
 import 'domain.dart';
@@ -520,25 +521,4 @@ class LetsEncrypt {
   /// is invalid.
   bool badCertificateCallback(X509Certificate cert, String host, int port) =>
       !production;
-}
-
-/// The [LetsEncrypt.checkCertificate] status.
-enum CheckCertificateStatus {
-  ok,
-  okRefreshed,
-  invalid,
-  error,
-}
-
-extension CheckCertificateStatusExtension on CheckCertificateStatus {
-  /// Returns `true` if is `ok` or `okRefreshed`.
-  bool get isOK =>
-      this == CheckCertificateStatus.ok ||
-      this == CheckCertificateStatus.okRefreshed;
-
-  /// Returns: ![isOK]
-  bool get isNotOK => !isOK;
-
-  /// Returns `true` if is `okRefreshed`.
-  bool get isOkRefreshed => this == CheckCertificateStatus.okRefreshed;
 }
