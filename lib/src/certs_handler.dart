@@ -6,7 +6,6 @@ import 'package:basic_utils/basic_utils.dart' hide Domain;
 import 'package:collection/collection.dart';
 
 import '../shelf_letsencrypt.dart';
-import 'pem_key_pair.dart';
 
 /// Base class for a certificate handler.
 ///

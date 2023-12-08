@@ -6,7 +6,6 @@ import 'package:basic_utils/basic_utils.dart' hide Domain;
 import 'package:path/path.dart' as pack_path;
 import 'package:shelf/shelf.dart';
 import 'package:shelf_letsencrypt/shelf_letsencrypt.dart';
-import 'package:shelf_letsencrypt/src/certificates_handler_io.dart';
 import 'package:test/test.dart';
 
 void main() {

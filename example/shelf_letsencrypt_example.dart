@@ -2,7 +2,6 @@ import 'dart:io';
 
 import 'package:shelf/shelf.dart';
 import 'package:shelf_letsencrypt/shelf_letsencrypt.dart';
-import 'package:shelf_letsencrypt/src/certificates_handler_io.dart';
 
 /// Start the example with a list of domains and a recipriocal
 /// email address for the domain admin.

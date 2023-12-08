@@ -6,9 +6,6 @@ import 'package:collection/collection.dart';
 import 'package:path/path.dart' as pack_path;
 
 import '../shelf_letsencrypt.dart';
-import 'domain_certificate_file_path.dart';
-import 'pem_key_pair.dart';
-import 'security_context_builder.dart';
 
 /// A [CertificatesHandler] implementation using [dart:io].
 class CertificatesHandlerIO extends CertificatesHandler {
