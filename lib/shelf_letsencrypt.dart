@@ -8,3 +8,4 @@ export 'src/domain_certificate_file_path.dart';
 export 'src/letsencrypt.dart';
 export 'src/pem_key_pair.dart';
 export 'src/security_context_builder.dart';
+export 'src/logging.dart' show Logging;
