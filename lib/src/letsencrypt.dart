@@ -9,6 +9,7 @@ import 'package:shelf/shelf.dart';
 import 'package:shelf/shelf_io.dart';
 
 import 'certs_handler.dart';
+import 'domain.dart';
 
 /// Let's Encrypt certificate tool.
 class LetsEncrypt {
@@ -319,7 +320,7 @@ class LetsEncrypt {
   ///
   /// - If [checkCertificate] is `true` will check the current certificate.
   Future<List<HttpServer>> startSecureServer(
-      Handler handler, Map<String, String> domainsAndEmails,
+      Handler handler, List<Domain> domains,
       {int port = 80,
       int securePort = 443,
       String bindingAddress = '0.0.0.0',
@@ -330,7 +331,7 @@ class LetsEncrypt {
       bool forceRequestCertificate = false,
       bool loadAllHandledDomains = false}) async {
     _logInfo(
-        '''Starting server> bindingAddress: $bindingAddress ; port: $port ; domainAndEmails: $domainsAndEmails''');
+        '''Starting server> bindingAddress: $bindingAddress ; port: $port ; domain: $domains''');
 
     FutureOr<Response> handlerWithChallenge(Request r) {
       final path = r.requestedUri.path;
@@ -355,8 +356,6 @@ class LetsEncrypt {
 
     HttpServer? secureServer;
 
-    final domains = domainsAndEmails.keys.toList();
-
     _logInfo('$certificatesHandler');
     _logInfo('Handled domains: ${certificatesHandler.listAllHandledDomains()}');
 
@@ -378,8 +377,7 @@ class LetsEncrypt {
       _logInfo('Requesting certificate for: $domainsToCheck');
 
       for (final domain in domainsToCheck) {
-        final domainEmail = domainsAndEmails[domain]!;
-        final ok = await this.requestCertificate(domain, domainEmail);
+        final ok = await this.requestCertificate(domain);
         if (!ok) {
           throw StateError('Error requesting certificate!');
         }
@@ -403,12 +401,9 @@ class LetsEncrypt {
         var refreshedCertificate = false;
 
         for (final domain in domains) {
-          final domainEmail = domainsAndEmails[domain]!;
+          _logInfo('Checking certificate for: ${domain.name}');
 
-          _logInfo('Checking certificate for: $domain');
-
-          final checkCertificateStatus = await this.checkCertificate(
-              domain, domainEmail,
+          final checkCertificateStatus = await this.checkCertificate(domain,
               requestCertificate: requestCertificate,
               forceRequestCertificate: forceRequestCertificate);
 
@@ -418,7 +413,7 @@ class LetsEncrypt {
             refreshedCertificate = true;
           } else if (checkCertificateStatus.isNotOK) {
             throw StateError(
-                '''Certificate check error! Status: $checkCertificateStatus ; domain: $domain''');
+                '''Certificate check error! Status: $checkCertificateStatus ; domain: ${domain.name}''');
           }
         }
 
@@ -429,7 +424,7 @@ class LetsEncrypt {
               loadAllHandledDomains: loadAllHandledDomains);
           if (securityContext == null) {
             throw StateError(
-                '''Error loading SecureContext after successful certificate check for: $domains''');
+                '''Error loading SecureContext after successful certificate check for: ${Domain.toNames(domains)}''');
           }
 
           _logWarning('Restarting secure server...');
@@ -443,7 +438,7 @@ class LetsEncrypt {
   }
 
   /// Checks the [domain] certificate.
-  Future<CheckCertificateStatus> checkCertificate(String domain, String email,
+  Future<CheckCertificateStatus> checkCertificate(Domain domain,
       {bool requestCertificate = false,
       bool forceRequestCertificate = false,
       int maxRetries = 3,
@@ -460,7 +455,7 @@ class LetsEncrypt {
     }
 
     try {
-      final ok = await this.requestCertificate(domain, email);
+      final ok = await this.requestCertificate(domain);
       return ok
           ? CheckCertificateStatus.okRefreshed
           : CheckCertificateStatus.error;
@@ -473,21 +468,22 @@ class LetsEncrypt {
   /// Request a certificate for [domain] using an `ACME` client.
   ///
   /// Calls [doACMEChallenge].
-  Future<bool> requestCertificate(String domain, String email) async {
+  Future<bool> requestCertificate(Domain domain) async {
     final accountKeyPair = await certificatesHandler.ensureAccountPEMKeyPair();
 
-    await certificatesHandler.ensureDomainPEMKeyPair(domain);
+    await certificatesHandler.ensureDomainPEMKeyPair(domain.name);
 
-    final csr = await certificatesHandler.generateCSR(domain, email);
+    final csr =
+        await certificatesHandler.generateCSR(domain.name, domain.email);
     if (csr == null) {
       throw StateError("Can't generate CSR for domain: $domain");
     }
 
-    final certs = await doACMEChallenge(domain, [email],
+    final certs = await doACMEChallenge(domain.name, [domain.email],
         accountKeyPair.privateKeyPEM, accountKeyPair.publicKeyPEM, csr);
 
-    final ok =
-        await certificatesHandler.saveSignedCertificateChain(domain, certs);
+    final ok = await certificatesHandler.saveSignedCertificateChain(
+        domain.name, certs);
 
     return ok;
   }
@@ -498,7 +494,7 @@ class LetsEncrypt {
   Duration minCertificateValidityTime = const Duration(days: 5);
 
   /// Returns true if [domain] HTTPS is OK.
-  Future<bool> isDomainHttpsOK(String domain,
+  Future<bool> isDomainHttpsOK(Domain domain,
       {int maxRetries = 3, Duration? retryInterval}) async {
     if (retryInterval == null) {
       retryInterval = const Duration(seconds: 1);
@@ -509,7 +505,7 @@ class LetsEncrypt {
     final minCertificateValidityTime = this.minCertificateValidityTime;
 
     final domainURL =
-        Uri.parse('https://$domain/.well-known/check/${DateTime.now()}');
+        Uri.parse('https://${domain.name}/.well-known/check/${DateTime.now()}');
 
     for (var i = 0; i < maxRetries; ++i) {
       if (i > 0) {

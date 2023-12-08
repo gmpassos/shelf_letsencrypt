@@ -2,10 +2,11 @@
 
 import 'dart:io';
 
-import 'package:basic_utils/basic_utils.dart';
+import 'package:basic_utils/basic_utils.dart' hide Domain;
 import 'package:path/path.dart' as pack_path;
 import 'package:shelf/shelf.dart';
 import 'package:shelf_letsencrypt/shelf_letsencrypt.dart';
+import 'package:shelf_letsencrypt/src/certificates_handler_io.dart';
 import 'package:test/test.dart';
 
 void main() {
@@ -17,14 +18,14 @@ void main() {
     });
 
     test('basic', () async {
-      const domain = 'foo.com';
-      const email = 'contact@foo.com';
+      const domain = Domain(name: 'foo.com', email: 'contact@foo.com');
 
       final certificatesHandler = CertificatesHandlerIO(
           Directory(pack_path.join(tmpDir.path, 'certs-1')));
 
       expect(await certificatesHandler.getAccountPEMKeyPair(), isNull);
-      expect(await certificatesHandler.getDomainPEMKeyPair(domain), isNull);
+      expect(
+          await certificatesHandler.getDomainPEMKeyPair(domain.name), isNull);
       expect(await certificatesHandler.buildSecurityContext([domain]), isNull);
 
       final accountPEMKeyPair =
@@ -35,12 +36,13 @@ void main() {
       expect(accountPEMKeyPair.privateKey, isNotNull);
 
       final domainPEMKeyPair =
-          await certificatesHandler.ensureDomainPEMKeyPair(domain);
+          await certificatesHandler.ensureDomainPEMKeyPair(domain.name);
       expect(domainPEMKeyPair, isNotNull);
       expect(domainPEMKeyPair.publicKey, isNotNull);
       expect(domainPEMKeyPair.privateKey, isNotNull);
 
-      final csr = (await certificatesHandler.generateCSR(domain, email))!;
+      final csr =
+          (await certificatesHandler.generateCSR(domain.name, domain.email))!;
       expect(csr, isNotEmpty);
 
       // self sign:
@@ -74,8 +76,7 @@ void main() {
           allOf(contains('letsencrypt.org'), contains('staging')));
 
       final checkCertificateStatus = await letsEncrypt.checkCertificate(
-        'localhost',
-        'contact@localhost',
+        const Domain(name: 'localhost', email: 'contact@localhost'),
         retryInterval: const Duration(milliseconds: 1),
       );
 
@@ -162,7 +163,7 @@ void main() {
       try {
         await letsEncrypt.startSecureServer(
           (request) => Response.ok('Requested: ${request.requestedUri}'),
-          {'localhost': 'contact@localhost'},
+          [const Domain(name: 'localhost', email: 'contact@localhost')],
           port: 9180,
           securePort: 9143,
           requestCertificate: false,
