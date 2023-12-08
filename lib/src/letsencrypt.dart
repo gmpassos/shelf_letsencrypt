@@ -63,6 +63,7 @@ class LetsEncrypt {
   ///
   /// Used by [requestCertificate].
   Future<List<String>> doACMEChallenge(
+    int port,
     String cn,
     List<String> contacts,
     String accountPrivateKeyPem,
@@ -107,7 +108,7 @@ class LetsEncrypt {
 
     logger.info('Self test challenge... ${challengeData.toJson()}');
 
-    final selfTestOK = await _selfChallengeTest(client, challengeData);
+    final selfTestOK = await _selfChallengeTest(port, client, challengeData);
     if (!selfTestOK) {
       throw StateError('Self HTTP test not OK!');
     }
@@ -188,7 +189,7 @@ class LetsEncrypt {
   }
 
   Future<bool> _selfChallengeTest(
-      AcmeClient client, HttpDcvData challengeData) async {
+      int httpPort, AcmeClient client, HttpDcvData challengeData) async {
     var url = challengeData.fileName;
     if (!url.startsWith('http:') && !url.startsWith('https:')) {
       final idx = url.indexOf(':/');
@@ -198,10 +199,18 @@ class LetsEncrypt {
         rest = rest.replaceFirst(RegExp('^/+'), '');
         url = '$schema://${rest.replaceAll('//', '/')}';
       } else {
-        final rest = url.replaceFirst(RegExp('^/+'), '');
-        url = 'http://${rest.replaceAll('//', '/')}';
+        var rest = url.replaceFirst(RegExp('^/+'), '');
+        rest = rest.replaceFirst(RegExp('/'), ':$httpPort/');
+        rest = rest.replaceAll('//', '/');
+        url = 'http://$rest';
       }
     }
+
+    // if (port != 80)
+    // {
+    //   // patch the port no. into the request.
+    //   url.replaceFirst(RegExp(), to)
+    // }
 
     logger.info('Self test URL: $url');
 
@@ -295,7 +304,8 @@ class LetsEncrypt {
     HttpServer? secureServer;
 
     logger.info('$certificatesHandler');
-    logger.info('Handled domains: ${certificatesHandler.listAllHandledDomains()}');
+    logger.info(
+        'Handled domains: ${certificatesHandler.listAllHandledDomains()}');
 
     var securityContext = await certificatesHandler.buildSecurityContext(
         domains,
@@ -315,7 +325,7 @@ class LetsEncrypt {
       logger.info('Requesting certificate for: $domainsToCheck');
 
       for (final domain in domainsToCheck) {
-        final ok = await this.requestCertificate(domain);
+        final ok = await this.requestCertificate(port, domain);
         if (!ok) {
           throw StateError('Error requesting certificate!');
         }
@@ -328,7 +338,8 @@ class LetsEncrypt {
             '''Error loading SecureContext after successful request of certificate for: $domains''');
       }
 
-      logger.info('Starting secure server> port: $securePort ; domains: $domains');
+      logger.info(
+          'Starting secure server> port: $securePort ; domains: $domains');
       secureServer = await startSecureServer(securityContext);
     } else {
       secureServer = await startSecureServer(securityContext);
@@ -341,7 +352,8 @@ class LetsEncrypt {
         for (final domain in domains) {
           logger.info('Checking certificate for: ${domain.name}');
 
-          final checkCertificateStatus = await this.checkCertificate(domain,
+          final checkCertificateStatus = await this.checkCertificate(
+              port, domain,
               requestCertificate: requestCertificate,
               forceRequestCertificate: forceRequestCertificate);
 
@@ -376,7 +388,7 @@ class LetsEncrypt {
   }
 
   /// Checks the [domain] certificate.
-  Future<CheckCertificateStatus> checkCertificate(Domain domain,
+  Future<CheckCertificateStatus> checkCertificate(int port, Domain domain,
       {bool requestCertificate = false,
       bool forceRequestCertificate = false,
       int maxRetries = 3,
@@ -393,7 +405,7 @@ class LetsEncrypt {
     }
 
     try {
-      final ok = await this.requestCertificate(domain);
+      final ok = await this.requestCertificate(port, domain);
       return ok
           ? CheckCertificateStatus.okRefreshed
           : CheckCertificateStatus.error;
@@ -406,7 +418,7 @@ class LetsEncrypt {
   /// Request a certificate for [domain] using an `ACME` client.
   ///
   /// Calls [doACMEChallenge].
-  Future<bool> requestCertificate(Domain domain) async {
+  Future<bool> requestCertificate(int port, Domain domain) async {
     final accountKeyPair = await certificatesHandler.ensureAccountPEMKeyPair();
 
     await certificatesHandler.ensureDomainPEMKeyPair(domain.name);
@@ -417,7 +429,7 @@ class LetsEncrypt {
       throw StateError("Can't generate CSR for domain: $domain");
     }
 
-    final certs = await doACMEChallenge(domain.name, [domain.email],
+    final certs = await doACMEChallenge(port, domain.name, [domain.email],
         accountKeyPair.privateKeyPEM, accountKeyPair.publicKeyPEM, csr);
 
     final ok = await certificatesHandler.saveSignedCertificateChain(
