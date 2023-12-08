@@ -1,3 +1,5 @@
+// ignore_for_file: avoid_catches_without_on_clauses
+
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -10,10 +12,12 @@ import 'certs_handler.dart';
 
 /// Let's Encrypt certificate tool.
 class LetsEncrypt {
+  LetsEncrypt(this.certificatesHandler, {this.production = false, this.log});
+
   /// Returns `true` if [path] starts with `/.well-known/`.
   static bool isWellKnownPath(String path) => path.startsWith('/.well-known/');
 
-  @Deprecated("Use `isWellKnownPath`")
+  @Deprecated('Use `isWellKnownPath`')
   static bool isWellknownPath(String path) => isWellKnownPath(path);
 
   /// Returns `true` if [path] is an `ACME` request path.
@@ -35,8 +39,6 @@ class LetsEncrypt {
   final void Function(
           String level, Object? message, Object? error, StackTrace? stackTrace)?
       log;
-
-  LetsEncrypt(this.certificatesHandler, {this.production = false, this.log});
 
   void _logInfo(Object? m, [StackTrace? stackTrace]) {
     _logImpl('INFO', m, null, stackTrace);
@@ -62,17 +64,19 @@ class LetsEncrypt {
 
   void _logImpl(
       String level, Object? m, Object? error, StackTrace? stackTrace) {
-    if (m == null && error == null && stackTrace == null) return;
+    if (m == null && error == null && stackTrace == null) {
+      return;
+    }
 
-    var log = this.log;
+    final log = this.log;
     if (log != null) {
       log(level, m, error, stackTrace);
     } else {
-      var now = DateTime.now();
+      final now = DateTime.now();
 
-      var time = '$now'.padRight(26, '0');
+      final time = '$now'.padRight(26, '0');
 
-      var levelName = '[$level]'.padRight(9);
+      final levelName = '[$level]'.padRight(9);
 
       if (m == null && error != null) {
         m = error;
@@ -80,7 +84,7 @@ class LetsEncrypt {
       }
 
       if (m != null) {
-        var message = '$time $levelName LetsEncrypt > $m';
+        final message = '$time $levelName LetsEncrypt > $m';
         printToConsole(message);
       }
 
@@ -95,6 +99,7 @@ class LetsEncrypt {
   }
 
   void printToConsole(Object? o) {
+    // ignore: avoid_print
     print(o);
   }
 
@@ -121,11 +126,11 @@ class LetsEncrypt {
   Future<List<String>> doACMEChallenge(
     String cn,
     List<String> contacts,
-    final String accountPrivateKeyPem,
-    final String accountPublicKeyPem,
-    final String domainCSR,
+    String accountPrivateKeyPem,
+    String accountPublicKeyPem,
+    String domainCSR,
   ) async {
-    var contactsWithMethod = contacts
+    final contactsWithMethod = contacts
         .map((e) => !e.startsWith(_regexpContactMethodPrefix) && e.contains('@')
             ? 'mailto:$e'
             : e)
@@ -134,7 +139,7 @@ class LetsEncrypt {
     _logInfo(
         'apiBaseURL: $apiBaseURL ; cn: $cn ; contacts: $contactsWithMethod');
 
-    var client = AcmeClient(
+    final client = AcmeClient(
       apiBaseURL,
       accountPrivateKeyPem,
       accountPublicKeyPem,
@@ -144,63 +149,63 @@ class LetsEncrypt {
 
     await _initializeClient(client, cn);
 
-    var order = Order(identifiers: [Identifiers(type: 'dns', value: cn)]);
+    final order = Order(identifiers: [Identifiers(type: 'dns', value: cn)]);
     _logInfo('Order for $cn: ${order.toJson()}');
 
-    var newOrder = await client.order(order);
+    final newOrder = await client.order(order);
 
     _logInfo('Fetching authorization data for order...');
 
-    var auth = await client.getAuthorization(newOrder!);
+    final auth = await client.getAuthorization(newOrder!);
     if (auth == null || auth.isEmpty) {
       throw StateError("Can't get Authorization");
     }
 
-    var mainAuth = auth.first;
-    var challengeData = mainAuth.getHttpDcvData();
+    final mainAuth = auth.first;
+    final challengeData = mainAuth.getHttpDcvData();
 
     _challengesTokens[cn] = challengeData.fileContent;
 
     _logInfo('Self test challenge... ${challengeData.toJson()}');
 
-    var selfTestOK = await _selfChallengeTest(client, challengeData);
+    final selfTestOK = await _selfChallengeTest(client, challengeData);
     if (!selfTestOK) {
-      throw StateError("Self HTTP test not OK!");
+      throw StateError('Self HTTP test not OK!');
     }
 
-    var challenge =
+    final challenge =
         mainAuth.challenges!.firstWhere((e) => e.type == VALIDATION_HTTP);
 
     _logInfo('Validating challenge: ${challenge.toJson()}');
-    var valid = await client.validate(challenge);
+    final valid = await client.validate(challenge);
 
     if (!valid) {
-      throw StateError("Challenge not valid!");
+      throw StateError('Challenge not valid!');
     }
 
     _logInfo('Authorization successful!');
 
-    await Future.delayed(Duration(seconds: 1));
+    await Future.delayed(const Duration(seconds: 1), () {});
 
-    var ready = await client.isReady(newOrder);
+    final ready = await client.isReady(newOrder);
     if (!ready) {
-      throw StateError("Order not ready!");
+      throw StateError('Order not ready!');
     }
 
     _logInfo('Finalizing order...');
-    var persistent = await client.finalizeOrder(newOrder, domainCSR);
+    final persistent = await client.finalizeOrder(newOrder, domainCSR);
 
     if (persistent == null) {
-      throw StateError("Error finalizing order!");
+      throw StateError('Error finalizing order!');
     }
 
     _logInfo('Getting certificates...');
-    var certs = await client.getCertificate(persistent);
+    final certs = await client.getCertificate(persistent);
 
     _challengesTokens.remove(cn);
 
     if (certs == null || certs.isEmpty) {
-      throw StateError("Error getting certificates!");
+      throw StateError('Error getting certificates!');
     }
 
     _logInfo('Certificates:\n>> ${certs.join('\n>> ')}');
@@ -247,14 +252,14 @@ class LetsEncrypt {
       AcmeClient client, HttpDcvData challengeData) async {
     var url = challengeData.fileName;
     if (!url.startsWith('http:') && !url.startsWith('https:')) {
-      var idx = url.indexOf(':/');
+      final idx = url.indexOf(':/');
       if (idx >= 0) {
-        var schema = url.substring(0, idx);
+        final schema = url.substring(0, idx);
         var rest = url.substring(idx);
-        rest = rest.replaceFirst(RegExp(r'^/+'), '');
+        rest = rest.replaceFirst(RegExp('^/+'), '');
         url = '$schema://${rest.replaceAll('//', '/')}';
       } else {
-        var rest = url.replaceFirst(RegExp(r'^/+'), '');
+        final rest = url.replaceFirst(RegExp('^/+'), '');
         url = 'http://${rest.replaceAll('//', '/')}';
       }
     }
@@ -265,7 +270,7 @@ class LetsEncrypt {
     try {
       content = await getURL(Uri.parse(url));
     } catch (e, s) {
-      _logError("Self test request error for URL: $url", e, s);
+      _logError('Self test request error for URL: $url', e, s);
       return false;
     }
 
@@ -274,7 +279,7 @@ class LetsEncrypt {
       return false;
     }
 
-    var match = content.trim() == challengeData.fileContent;
+    final match = content.trim() == challengeData.fileContent;
 
     if (match) {
       _logInfo('Self test: OK');
@@ -288,21 +293,19 @@ class LetsEncrypt {
   /// A helper method to process a self check [Request].
   ///
   /// See [isSelfCheckPath].
-  Response processSelfCheckRequest(Request request) {
-    return Response.ok('OK');
-  }
+  Response processSelfCheckRequest(Request request) => Response.ok('OK');
 
   /// A helper method to process an ACME `shelf` [Request].
   ///
   /// See [isACMEPath].
   Response processACMEChallengeRequest(Request request) {
-    var host = request.headers['host'] ?? '';
-    var cn = host.split(':')[0];
+    final host = request.headers['host'] ?? '';
+    final cn = host.split(':')[0];
 
-    var challengeToken = getChallengeToken(cn);
+    final challengeToken = getChallengeToken(cn);
 
     _logInfo(
-        'Processing ACME challenge> cn: $cn ; token: $challengeToken > ${request.requestedUri}');
+        '''Processing ACME challenge> cn: $cn ; token: $challengeToken > ${request.requestedUri}''');
 
     if (challengeToken == null) {
       return Response.notFound('No ACME challenge token!');
@@ -311,14 +314,15 @@ class LetsEncrypt {
     return Response.ok(challengeToken);
   }
 
-  /// Starts 2 [HttpServer] instances, one HTTP at [port] and other HTTPS at [securePort].
+  /// Starts 2 [HttpServer] instances, one HTTP at [port]
+  /// and other HTTPS at [securePort].
   ///
   /// - If [checkCertificate] is `true` will check the current certificate.
   Future<List<HttpServer>> startSecureServer(
       Handler handler, Map<String, String> domainsAndEmails,
       {int port = 80,
       int securePort = 443,
-      bindingAddress = '0.0.0.0',
+      String bindingAddress = '0.0.0.0',
       int? backlog,
       bool shared = false,
       bool checkCertificate = true,
@@ -326,9 +330,9 @@ class LetsEncrypt {
       bool forceRequestCertificate = false,
       bool loadAllHandledDomains = false}) async {
     _logInfo(
-        'Starting server> bindingAddress: $bindingAddress ; port: $port ; domainAndEmails: $domainsAndEmails');
+        '''Starting server> bindingAddress: $bindingAddress ; port: $port ; domainAndEmails: $domainsAndEmails''');
 
-    FutureOr<Response> handlerWithChallenge(r) {
+    FutureOr<Response> handlerWithChallenge(Request r) {
       final path = r.requestedUri.path;
 
       if (LetsEncrypt.isWellKnownPath(path)) {
@@ -342,17 +346,16 @@ class LetsEncrypt {
       return handler(r);
     }
 
-    var server = await serve(handlerWithChallenge, bindingAddress, port,
+    final server = await serve(handlerWithChallenge, bindingAddress, port,
         backlog: backlog, shared: shared);
 
-    Future<HttpServer> startSecureServer(SecurityContext securityContext) {
-      return serve(handlerWithChallenge, bindingAddress, securePort,
-          securityContext: securityContext, backlog: backlog, shared: shared);
-    }
+    Future<HttpServer> startSecureServer(SecurityContext securityContext) =>
+        serve(handlerWithChallenge, bindingAddress, securePort,
+            securityContext: securityContext, backlog: backlog, shared: shared);
 
     HttpServer? secureServer;
 
-    var domains = domainsAndEmails.keys.toList();
+    final domains = domainsAndEmails.keys.toList();
 
     _logInfo('$certificatesHandler');
     _logInfo('Handled domains: ${certificatesHandler.listAllHandledDomains()}');
@@ -362,23 +365,23 @@ class LetsEncrypt {
         loadAllHandledDomains: loadAllHandledDomains);
 
     _logInfo(
-        'securityContext[loadAllHandledDomains: $loadAllHandledDomains]: $securityContext');
+        '''securityContext[loadAllHandledDomains: $loadAllHandledDomains]: $securityContext''');
 
     if (securityContext == null) {
       if (!requestCertificate) {
         throw StateError(
-            "No previous SecureContext. Parameter `requestCertificate` is `false`, can't request certificate!");
+            """No previous SecureContext. Parameter `requestCertificate` is `false`, can't request certificate!""");
       }
 
-      var domainsToCheck = certificatesHandler.listNotHandledDomains(domains);
+      final domainsToCheck = certificatesHandler.listNotHandledDomains(domains);
 
       _logInfo('Requesting certificate for: $domainsToCheck');
 
-      for (var domain in domainsToCheck) {
-        var domainEmail = domainsAndEmails[domain]!;
-        var ok = await this.requestCertificate(domain, domainEmail);
+      for (final domain in domainsToCheck) {
+        final domainEmail = domainsAndEmails[domain]!;
+        final ok = await this.requestCertificate(domain, domainEmail);
         if (!ok) {
-          throw StateError("Error requesting certificate!");
+          throw StateError('Error requesting certificate!');
         }
       }
 
@@ -386,7 +389,7 @@ class LetsEncrypt {
           loadAllHandledDomains: loadAllHandledDomains);
       if (securityContext == null) {
         throw StateError(
-            "Error loading SecureContext after successful request of certificate for: $domains");
+            '''Error loading SecureContext after successful request of certificate for: $domains''');
       }
 
       _logInfo('Starting secure server> port: $securePort ; domains: $domains');
@@ -399,12 +402,12 @@ class LetsEncrypt {
 
         var refreshedCertificate = false;
 
-        for (var domain in domains) {
-          var domainEmail = domainsAndEmails[domain]!;
+        for (final domain in domains) {
+          final domainEmail = domainsAndEmails[domain]!;
 
           _logInfo('Checking certificate for: $domain');
 
-          var checkCertificateStatus = await this.checkCertificate(
+          final checkCertificateStatus = await this.checkCertificate(
               domain, domainEmail,
               requestCertificate: requestCertificate,
               forceRequestCertificate: forceRequestCertificate);
@@ -415,7 +418,7 @@ class LetsEncrypt {
             refreshedCertificate = true;
           } else if (checkCertificateStatus.isNotOK) {
             throw StateError(
-                "Certificate check error! Status: $checkCertificateStatus ; domain: $domain");
+                '''Certificate check error! Status: $checkCertificateStatus ; domain: $domain''');
           }
         }
 
@@ -426,7 +429,7 @@ class LetsEncrypt {
               loadAllHandledDomains: loadAllHandledDomains);
           if (securityContext == null) {
             throw StateError(
-                "Error loading SecureContext after successful certificate check for: $domains");
+                '''Error loading SecureContext after successful certificate check for: $domains''');
           }
 
           _logWarning('Restarting secure server...');
@@ -445,7 +448,7 @@ class LetsEncrypt {
       bool forceRequestCertificate = false,
       int maxRetries = 3,
       Duration? retryInterval}) async {
-    var domainHttpsOK = await isDomainHttpsOK(domain,
+    final domainHttpsOK = await isDomainHttpsOK(domain,
         maxRetries: maxRetries, retryInterval: retryInterval);
 
     if (domainHttpsOK && !forceRequestCertificate) {
@@ -457,7 +460,7 @@ class LetsEncrypt {
     }
 
     try {
-      var ok = await this.requestCertificate(domain, email);
+      final ok = await this.requestCertificate(domain, email);
       return ok
           ? CheckCertificateStatus.okRefreshed
           : CheckCertificateStatus.error;
@@ -471,19 +474,19 @@ class LetsEncrypt {
   ///
   /// Calls [doACMEChallenge].
   Future<bool> requestCertificate(String domain, String email) async {
-    var accountKeyPair = await certificatesHandler.ensureAccountPEMKeyPair();
+    final accountKeyPair = await certificatesHandler.ensureAccountPEMKeyPair();
 
     await certificatesHandler.ensureDomainPEMKeyPair(domain);
 
-    var csr = await certificatesHandler.generateCSR(domain, email);
+    final csr = await certificatesHandler.generateCSR(domain, email);
     if (csr == null) {
       throw StateError("Can't generate CSR for domain: $domain");
     }
 
-    var certs = await doACMEChallenge(domain, [email],
+    final certs = await doACMEChallenge(domain, [email],
         accountKeyPair.privateKeyPEM, accountKeyPair.publicKeyPEM, csr);
 
-    var ok =
+    final ok =
         await certificatesHandler.saveSignedCertificateChain(domain, certs);
 
     return ok;
@@ -492,29 +495,31 @@ class LetsEncrypt {
   /// The minimal accepted HTTPS certificate validity time
   /// when checking the current certificate validity. Default: 5 days
   /// - See [isDomainHttpsOK].
-  Duration minCertificateValidityTime = Duration(days: 5);
+  Duration minCertificateValidityTime = const Duration(days: 5);
 
   /// Returns true if [domain] HTTPS is OK.
   Future<bool> isDomainHttpsOK(String domain,
       {int maxRetries = 3, Duration? retryInterval}) async {
     if (retryInterval == null) {
-      retryInterval = Duration(seconds: 1);
+      retryInterval = const Duration(seconds: 1);
     } else if (retryInterval.inMilliseconds < 10) {
-      retryInterval = Duration(milliseconds: 10);
+      retryInterval = const Duration(milliseconds: 10);
     }
 
     final minCertificateValidityTime = this.minCertificateValidityTime;
 
-    var domainURL =
+    final domainURL =
         Uri.parse('https://$domain/.well-known/check/${DateTime.now()}');
 
     for (var i = 0; i < maxRetries; ++i) {
       if (i > 0) {
-        await Future.delayed(retryInterval);
+        await Future.delayed(retryInterval, () {});
       }
-      var ok = await isUrlOK(domainURL,
+      final ok = await isUrlOK(domainURL,
           minCertificateValidityTime: minCertificateValidityTime);
-      if (ok) return true;
+      if (ok) {
+        return true;
+      }
     }
 
     return false;
@@ -523,11 +528,9 @@ class LetsEncrypt {
   /// Returns `true` if the [url] is OK (performs a request).
   Future<bool> isUrlOK(Uri url, {Duration? minCertificateValidityTime}) async {
     try {
-      var body = await getURL(
+      final body = await getURL(
         url,
-        checkCertificate: true,
         minCertificateValidityTime: minCertificateValidityTime,
-        log: true,
       );
       return body != null;
     } catch (_) {
@@ -540,37 +543,39 @@ class LetsEncrypt {
       {Duration? minCertificateValidityTime,
       bool checkCertificate = true,
       bool log = true}) async {
-    HttpClient client = HttpClient()
+    final client = HttpClient()
       ..badCertificateCallback = badCertificateCallback;
 
-    var request = await client.getUrl(url);
-    var response = await request.close();
+    final request = await client.getUrl(url);
+    final response = await request.close();
 
-    var ok = response.statusCode == 200;
-    if (!ok) return null;
+    final ok = response.statusCode == 200;
+    if (!ok) {
+      return null;
+    }
 
-    var certificate = response.certificate;
+    final certificate = response.certificate;
     if (certificate != null && checkCertificate) {
-      var now = DateTime.now();
-      var endValidity = certificate.endValidity;
-      var timeLeftInValidity = endValidity.difference(now);
+      final now = DateTime.now();
+      final endValidity = certificate.endValidity;
+      final timeLeftInValidity = endValidity.difference(now);
 
       if (timeLeftInValidity.isNegative) {
         _logWarning(
-            "URL `${url.scheme}://${url.host}` certificate expired> timeLeftInValidity: ${timeLeftInValidity.inHours} h ; endValidity: $endValidity ; now: $now");
+            'URL `${url.scheme}://${url.host}` certificate expired> timeLeftInValidity: ${timeLeftInValidity.inHours} h ; endValidity: $endValidity ; now: $now');
         return null;
       }
 
       if (minCertificateValidityTime != null &&
           timeLeftInValidity < minCertificateValidityTime) {
         _logWarning(
-            "URL `${url.scheme}://${url.host}` certificate short validity period> timeLeftInValidity: ${timeLeftInValidity.inHours} h ; minCertificateValidityTime: ${minCertificateValidityTime.inHours} h ; endValidity: $endValidity ; now: $now");
+            'URL `${url.scheme}://${url.host}` certificate short validity period> timeLeftInValidity: ${timeLeftInValidity.inHours} h ; minCertificateValidityTime: ${minCertificateValidityTime.inHours} h ; endValidity: $endValidity ; now: $now');
         return null;
       }
     }
 
-    var data = await response.transform(Utf8Decoder()).toList();
-    var body = data.join();
+    final data = await response.transform(const Utf8Decoder()).toList();
+    final body = data.join();
 
     return body;
   }
@@ -580,9 +585,8 @@ class LetsEncrypt {
   ///
   /// Defaults to ![production], since in [production] the staging certificate
   /// is invalid.
-  bool badCertificateCallback(X509Certificate cert, String host, int port) {
-    return !production;
-  }
+  bool badCertificateCallback(X509Certificate cert, String host, int port) =>
+      !production;
 }
 
 /// The [LetsEncrypt.checkCertificate] status.
