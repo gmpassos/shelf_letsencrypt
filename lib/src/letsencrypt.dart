@@ -206,12 +206,6 @@ class LetsEncrypt {
       }
     }
 
-    // if (port != 80)
-    // {
-    //   // patch the port no. into the request.
-    //   url.replaceFirst(RegExp(), to)
-    // }
-
     logger.info('Self test URL: $url');
 
     String? content;
@@ -262,12 +256,40 @@ class LetsEncrypt {
     return Response.ok(challengeToken);
   }
 
+  @Deprecated('Use startServer')
+  Future<List<HttpServer>> startSecureServer(
+      Handler handler, Map<String, String> domainsAndEmails,
+      {int port = 80,
+      int securePort = 443,
+      String bindingAddress = '0.0.0.0',
+      int? backlog,
+      bool shared = false,
+      bool checkCertificate = true,
+      bool requestCertificate = true,
+      bool forceRequestCertificate = false,
+      bool loadAllHandledDomains = false}) async {
+    final domains = <Domain>[];
+
+    for (var entry in domainsAndEmails.entries) {
+      domains.add(Domain(name: entry.key, email: entry.value));
+    }
+    return startServer(handler, domains,
+        port: port,
+        securePort: securePort,
+        bindingAddress: bindingAddress,
+        backlog: backlog,
+        shared: shared,
+        checkCertificate: checkCertificate,
+        requestCertificate: requestCertificate,
+        forceRequestCertificate: forceRequestCertificate,
+        loadAllHandledDomains: loadAllHandledDomains);
+  }
+
   /// Starts 2 [HttpServer] instances, one HTTP at [port]
   /// and other HTTPS at [securePort].
   ///
   /// - If [checkCertificate] is `true` will check the current certificate.
-  Future<List<HttpServer>> startSecureServer(
-      Handler handler, List<Domain> domains,
+  Future<List<HttpServer>> startServer(Handler handler, List<Domain> domains,
       {int port = 80,
       int securePort = 443,
       String bindingAddress = '0.0.0.0',

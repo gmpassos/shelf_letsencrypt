@@ -42,7 +42,7 @@ abstract class CertificatesHandler {
   /// If this instance doesn't have a valid certificate
   /// for [domains] it will return `null`.
   ///
-  /// See [LetsEncrypt.startSecureServer].
+  /// See [LetsEncrypt.startServer].
   FutureOr<SecurityContext?> buildSecurityContext(List<Domain> domains,
       {bool loadAllHandledDomains = true});
 

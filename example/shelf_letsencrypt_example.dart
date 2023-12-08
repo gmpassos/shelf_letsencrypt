@@ -32,7 +32,7 @@ void main(List<String> args) async {
   final pipeline = const Pipeline().addMiddleware(logRequests());
   final handler = pipeline.addHandler(_processRequest);
 
-  final servers = await letsEncrypt.startSecureServer(
+  final servers = await letsEncrypt.startServer(
     handler,
     domains,
     loadAllHandledDomains: true,

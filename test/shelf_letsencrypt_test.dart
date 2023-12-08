@@ -161,7 +161,7 @@ void main() {
 
       StateError? error;
       try {
-        await letsEncrypt.startSecureServer(
+        await letsEncrypt.startServer(
           (request) => Response.ok('Requested: ${request.requestedUri}'),
           [const Domain(name: 'localhost', email: 'contact@localhost')],
           port: 9180,
