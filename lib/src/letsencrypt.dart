@@ -15,8 +15,17 @@ import 'logging.dart';
 
 /// Let's Encrypt certificate tool.
 class LetsEncrypt {
-  LetsEncrypt(this.certificatesHandler, {this.production = false, Logging? log})
+  LetsEncrypt(this.certificatesHandler,
+      {this.port = 80,
+      this.securePort = 443,
+      this.bindingAddress = '0.0.0.0',
+      this.production = false,
+      Logging? log})
       : logger = Logger(log);
+
+  final int port;
+  final int securePort;
+  final String bindingAddress;
 
   Logger logger;
 
@@ -63,7 +72,6 @@ class LetsEncrypt {
   ///
   /// Used by [requestCertificate].
   Future<List<String>> doACMEChallenge(
-    int port,
     String cn,
     List<String> contacts,
     String accountPrivateKeyPem,
@@ -108,7 +116,7 @@ class LetsEncrypt {
 
     logger.info('Self test challenge... ${challengeData.toJson()}');
 
-    final selfTestOK = await _selfChallengeTest(port, client, challengeData);
+    final selfTestOK = await _selfChallengeTest(client, challengeData);
     if (!selfTestOK) {
       throw StateError('Self HTTP test not OK!');
     }
@@ -192,7 +200,7 @@ class LetsEncrypt {
   }
 
   Future<bool> _selfChallengeTest(
-      int httpPort, AcmeClient client, HttpDcvData challengeData) async {
+      AcmeClient client, HttpDcvData challengeData) async {
     var url = challengeData.fileName;
     if (!url.startsWith('http:') && !url.startsWith('https:')) {
       final idx = url.indexOf(':/');
@@ -203,7 +211,7 @@ class LetsEncrypt {
         url = '$schema://${rest.replaceAll('//', '/')}';
       } else {
         var rest = url.replaceFirst(RegExp('^/+'), '');
-        rest = rest.replaceFirst(RegExp('/'), ':$httpPort/');
+        rest = rest.replaceFirst(RegExp('/'), ':$port/');
         rest = rest.replaceAll('//', '/');
         url = 'http://$rest';
       }
@@ -262,10 +270,7 @@ class LetsEncrypt {
   @Deprecated('Use startServer')
   Future<List<HttpServer>> startSecureServer(
       Handler handler, Map<String, String> domainsAndEmails,
-      {int port = 80,
-      int securePort = 443,
-      String bindingAddress = '0.0.0.0',
-      int? backlog,
+      {int? backlog,
       bool shared = false,
       bool checkCertificate = true,
       bool requestCertificate = true,
@@ -277,9 +282,6 @@ class LetsEncrypt {
       domains.add(Domain(name: entry.key, email: entry.value));
     }
     return startServer(handler, domains,
-        port: port,
-        securePort: securePort,
-        bindingAddress: bindingAddress,
         backlog: backlog,
         shared: shared,
         checkCertificate: checkCertificate,
@@ -291,12 +293,15 @@ class LetsEncrypt {
   /// Starts 2 [HttpServer] instances, one HTTP at [port]
   /// and other HTTPS at [securePort].
   ///
-  /// - If [checkCertificate] is `true` will check the current certificate.
+  /// - If [checkCertificate] is `true`, will check the current certificate
+  /// - if [requestCertificate] is `true` then we will  acquire/renew the certificate
+  ///  as needed.
+  /// - If [forceRequestCertificate] is `true` then we will force the acquistion
+  /// of a new certificate. WARNING: the Lets Encrypt CA has VERY tight rate limits
+  /// on certificate acquistion. If you breach them you will not be able to
+  /// acquire a new production certificate for 168 hours!!!!
   Future<List<HttpServer>> startServer(Handler handler, List<Domain> domains,
-      {int port = 80,
-      int securePort = 443,
-      String bindingAddress = '0.0.0.0',
-      int? backlog,
+      {int? backlog,
       bool shared = false,
       bool checkCertificate = true,
       bool requestCertificate = true,
@@ -350,7 +355,7 @@ class LetsEncrypt {
       logger.info('Requesting certificate for: $domainsToCheck');
 
       for (final domain in domainsToCheck) {
-        final ok = await this.requestCertificate(port, domain);
+        final ok = await this.requestCertificate(domain);
         if (!ok) {
           throw StateError('Error requesting certificate!');
         }
@@ -377,8 +382,7 @@ class LetsEncrypt {
         for (final domain in domains) {
           logger.info('Checking certificate for: ${domain.name}');
 
-          final checkCertificateStatus = await this.checkCertificate(
-              port, domain,
+          final checkCertificateStatus = await this.checkCertificate(domain,
               requestCertificate: requestCertificate,
               forceRequestCertificate: forceRequestCertificate);
 
@@ -413,7 +417,7 @@ class LetsEncrypt {
   }
 
   /// Checks the [domain] certificate.
-  Future<CheckCertificateStatus> checkCertificate(int port, Domain domain,
+  Future<CheckCertificateStatus> checkCertificate(Domain domain,
       {bool requestCertificate = false,
       bool forceRequestCertificate = false,
       int maxRetries = 3,
@@ -430,7 +434,7 @@ class LetsEncrypt {
     }
 
     try {
-      final ok = await this.requestCertificate(port, domain);
+      final ok = await this.requestCertificate(domain);
       return ok
           ? CheckCertificateStatus.okRefreshed
           : CheckCertificateStatus.error;
@@ -443,7 +447,7 @@ class LetsEncrypt {
   /// Request a certificate for [domain] using an `ACME` client.
   ///
   /// Calls [doACMEChallenge].
-  Future<bool> requestCertificate(int port, Domain domain) async {
+  Future<bool> requestCertificate(Domain domain) async {
     final accountKeyPair = await certificatesHandler.ensureAccountPEMKeyPair();
 
     await certificatesHandler.ensureDomainPEMKeyPair(domain.name);
@@ -454,7 +458,7 @@ class LetsEncrypt {
       throw StateError("Can't generate CSR for domain: $domain");
     }
 
-    final certs = await doACMEChallenge(port, domain.name, [domain.email],
+    final certs = await doACMEChallenge(domain.name, [domain.email],
         accountKeyPair.privateKeyPEM, accountKeyPair.publicKeyPEM, csr);
 
     final ok = await certificatesHandler.saveSignedCertificateChain(

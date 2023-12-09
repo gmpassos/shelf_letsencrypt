@@ -75,7 +75,6 @@ void main() {
           allOf(contains('letsencrypt.org'), contains('staging')));
 
       final checkCertificateStatus = await letsEncrypt.checkCertificate(
-        80,
         const Domain(name: 'localhost', email: 'contact@localhost'),
         retryInterval: const Duration(milliseconds: 1),
       );
@@ -155,7 +154,11 @@ void main() {
       final certificatesHandler = CertificatesHandlerIO(
           Directory(pack_path.join(tmpDir.path, 'certs-4')));
 
-      final letsEncrypt = LetsEncrypt(certificatesHandler);
+      final letsEncrypt = LetsEncrypt(
+        certificatesHandler,
+        port: 9180,
+        securePort: 9143,
+      );
 
       expect(letsEncrypt.production, isFalse);
 
@@ -164,8 +167,6 @@ void main() {
         await letsEncrypt.startServer(
           (request) => Response.ok('Requested: ${request.requestedUri}'),
           [const Domain(name: 'localhost', email: 'contact@localhost')],
-          port: 9180,
-          securePort: 9143,
           requestCertificate: false,
         );
       } catch (e) {
