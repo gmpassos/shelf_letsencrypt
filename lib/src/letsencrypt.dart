@@ -120,7 +120,10 @@ class LetsEncrypt {
     final valid = await client.validate(challenge);
 
     if (!valid) {
-      throw StateError('Challenge not valid!');
+      // if you trace through client.validate it returns a response
+      // object and you can find the actual problem in
+      // response!.data['challenges'][0]['error']['detail']
+      throw StateError('Challenge not valid - check your firewall and DNS!');
     }
 
     logger.info('Authorization successful!');
