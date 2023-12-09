@@ -99,7 +99,11 @@ void main(List<String> args) async {
   final certificatesHandler = CertificatesHandlerIO(Directory(certificatesDirectory));
 
   // The Let's Encrypt integration tool in `staging` mode:
-  final LetsEncrypt letsEncrypt = LetsEncrypt(certificatesHandler, production: false);
+  final LetsEncrypt letsEncrypt = LetsEncrypt(certificatesHandler
+    , production: false
+    , port: 80
+    , securePort: 443
+);
 
   // `shelf` Pipeline:
   var pipeline = const Pipeline().addMiddleware(logRequests());
@@ -108,8 +112,6 @@ void main(List<String> args) async {
   var servers = await letsEncrypt.startSecureServer(
     handler,
     domains,
-    port: 80,
-    securePort: 443,
   );
 
   var server = servers[0]; // HTTP Server.
@@ -150,6 +152,18 @@ Response _processRequest(Request request) {
   return Response.ok('Requested: ${request.requestedUri}');
 }
 ```
+
+## renewals
+Each time your call startServer it will check if any certificates need to
+be renewed in the next 5 days (or if they are expired) and renew the
+certificate.
+
+This however isn't sufficient for any long running service.
+
+The example includes a renewal service that does a daily check if any certificate
+need renewing.
+If a cert needs to be renewed, it will renew it and then gracefully restart
+the server with the new certs.
 
 ## Source
 

@@ -1,7 +1,11 @@
 import 'dart:io';
 
+import 'package:cron/cron.dart';
 import 'package:shelf/shelf.dart';
 import 'package:shelf_letsencrypt/shelf_letsencrypt.dart';
+
+late HttpServer server; // HTTP Server.
+late HttpServer serverSecure; // HTTPS Server.
 
 /// Start the example with a list of domains and a recipriocal
 /// email address for the domain admin.
@@ -26,8 +30,14 @@ void main(List<String> args) async {
       CertificatesHandlerIO(Directory(certificatesDirectory));
 
   // The Let's Encrypt integration tool in `staging` mode:
-  final letsEncrypt = LetsEncrypt(certificatesHandler);
+  final letsEncrypt = LetsEncrypt(certificatesHandler,
+      production: false, port: 80, securePort: 443);
 
+  await _startServer(letsEncrypt, domains);
+  await _startRenewalService(letsEncrypt, domains, server, serverSecure);
+}
+
+Future<void> _startServer(LetsEncrypt letsEncrypt, List<Domain> domains) async {
   // `shelf` Pipeline:
   final pipeline = const Pipeline().addMiddleware(logRequests());
   final handler = pipeline.addHandler(_processRequest);
@@ -38,8 +48,8 @@ void main(List<String> args) async {
     loadAllHandledDomains: true,
   );
 
-  final server = servers[0]; // HTTP Server.
-  final serverSecure = servers[1]; // HTTPS Server.
+  server = servers[0]; // HTTP Server.
+  serverSecure = servers[1]; // HTTPS Server.
 
   // Enable gzip:
   server.autoCompress = true;
@@ -47,6 +57,42 @@ void main(List<String> args) async {
 
   print('Serving at http://${server.address.host}:${server.port}');
   print('Serving at https://${serverSecure.address.host}:${serverSecure.port}');
+}
+
+/// Check every hour if any of the certificates need to be renewed.
+Future<void> _startRenewalService(LetsEncrypt letsEncrypt, List<Domain> domains,
+    HttpServer server, HttpServer secureServer) async {
+  Cron().schedule(
+      Schedule(hours: '*/1'), // every hour
+      () => refreshIfRequired(letsEncrypt, domains));
+}
+
+Future<void> refreshIfRequired(
+  LetsEncrypt letsEncrypt,
+  List<Domain> domains,
+) async {
+  print('Checking if any certificates need to be renewed');
+
+  var restartRequired = false;
+
+  for (final domain in domains) {
+    final result =
+        await letsEncrypt.checkCertificate(domain, requestCertificate: true);
+
+    if (result.isOkRefreshed) {
+      print('certificate for ${domain.name} was renewed');
+      restartRequired = true;
+    } else {
+      print('Renewal not required');
+    }
+  }
+
+  if (restartRequired) {
+    // restart the servers.
+    await Future.wait<void>([server.close(), serverSecure.close()]);
+    await _startServer(letsEncrypt, domains);
+    print('services restarted');
+  }
 }
 
 /// splits the command line arguments into a list of [Domain]s

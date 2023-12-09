@@ -483,8 +483,8 @@ class LetsEncrypt {
 
     final minCertificateValidityTime = this.minCertificateValidityTime;
 
-    final domainURL =
-        Uri.parse('https://${domain.name}:$securePort/.well-known/check/${DateTime.now()}');
+    final domainURL = Uri.parse(
+        'https://${domain.name}:$securePort/.well-known/check/${DateTime.now()}');
 
     for (var i = 0; i < maxRetries; ++i) {
       if (i > 0) {
