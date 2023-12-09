@@ -193,6 +193,7 @@ with your 1 hour.*
 # Author
 
 Graciliano M. Passos: [gmpassos@GitHub][github].
+Brett Sutton [bsutton@GitHub][github]
 
 [github]: https://github.com/gmpassos
 
