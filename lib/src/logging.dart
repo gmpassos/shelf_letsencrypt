@@ -2,9 +2,9 @@ typedef Logging = void Function(
     String level, Object? message, Object? error, StackTrace? stackTrace);
 
 class Logger {
-  Logger(this.log);
-
   Logging? log;
+
+  Logger(this.log);
 
   void info(Object? m, [StackTrace? stackTrace]) {
     _logImpl('INFO', m, null, stackTrace);

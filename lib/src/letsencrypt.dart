@@ -1,5 +1,3 @@
-// ignore_for_file: avoid_catches_without_on_clauses
-
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -7,14 +5,18 @@ import 'dart:io';
 import 'package:acme_client/acme_client.dart';
 import 'package:shelf/shelf.dart';
 import 'package:shelf/shelf_io.dart';
-import 'package:shelf_letsencrypt/src/check_certificate_status.dart';
 
 import 'certs_handler.dart';
+import 'check_certificate_status.dart';
 import 'domain.dart';
 import 'logging.dart';
 
 /// Let's Encrypt certificate tool.
 class LetsEncrypt {
+  final int port;
+  final int securePort;
+  final String bindingAddress;
+
   LetsEncrypt(this.certificatesHandler,
       {this.port = 80,
       this.securePort = 443,
@@ -22,10 +24,6 @@ class LetsEncrypt {
       this.production = false,
       Logging? log})
       : logger = Logger(log);
-
-  final int port;
-  final int securePort;
-  final String bindingAddress;
 
   Logger logger;
 
@@ -267,7 +265,7 @@ class LetsEncrypt {
     return Response.ok(challengeToken);
   }
 
-  @Deprecated('Use startServer')
+  @Deprecated('Use `startServer`. Will be removed at v2.1.0')
   Future<List<HttpServer>> startSecureServer(
       Handler handler, Map<String, String> domainsAndEmails,
       {int? backlog,
@@ -281,13 +279,16 @@ class LetsEncrypt {
     for (var entry in domainsAndEmails.entries) {
       domains.add(Domain(name: entry.key, email: entry.value));
     }
-    return startServer(handler, domains,
+
+    var servers = await startServer(handler, domains,
         backlog: backlog,
         shared: shared,
         checkCertificate: checkCertificate,
         requestCertificate: requestCertificate,
         forceRequestCertificate: forceRequestCertificate,
         loadAllHandledDomains: loadAllHandledDomains);
+
+    return [servers.http, servers.https];
   }
 
   /// Starts 2 [HttpServer] instances, one HTTP at [port]
@@ -295,12 +296,15 @@ class LetsEncrypt {
   ///
   /// - If [checkCertificate] is `true`, will check the current certificate
   /// - if [requestCertificate] is `true` then we will  acquire/renew the certificate
-  ///  as needed.
+  ///   as needed.
   /// - If [forceRequestCertificate] is `true` then we will force the acquistion
-  /// of a new certificate. WARNING: the Lets Encrypt CA has VERY tight rate limits
+  ///   of a new certificate.
+  ///
+  /// *WARNING: the Lets Encrypt CA has VERY tight rate limits
   /// on certificate acquistion. If you breach them you will not be able to
-  /// acquire a new production certificate for 168 hours!!!!
-  Future<List<HttpServer>> startServer(Handler handler, List<Domain> domains,
+  /// acquire a new production certificate for 168 hours!!!*
+  Future<({HttpServer http, HttpServer https})> startServer(
+      Handler handler, List<Domain> domains,
       {int? backlog,
       bool shared = false,
       bool checkCertificate = true,
@@ -308,7 +312,7 @@ class LetsEncrypt {
       bool forceRequestCertificate = false,
       bool loadAllHandledDomains = false}) async {
     logger.info(
-        '''Starting server> bindingAddress: $bindingAddress ; port: $port ; domain: $domains''');
+        "Starting server> bindingAddress: $bindingAddress ; port: $port ; domain: $domains");
 
     FutureOr<Response> handlerWithChallenge(Request r) {
       final path = r.requestedUri.path;
@@ -413,7 +417,7 @@ class LetsEncrypt {
       }
     }
 
-    return [server, secureServer];
+    return (http: server, https: secureServer);
   }
 
   /// Checks the [domain] certificate.
