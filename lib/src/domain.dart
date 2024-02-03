@@ -1,11 +1,14 @@
-class Domain {
-  const Domain({required this.name, required this.email});
+import 'package:shelf_letsencrypt/shelf_letsencrypt.dart';
 
+/// A [LetsEncrypt] domain.
+class Domain {
+  /// The domain name. Ex.: your-domain.com
   final String name;
+
+  /// Domain contact e-mail.
   final String email;
 
-  @override
-  String toString() => '$name : $email';
+  const Domain({required this.name, required this.email});
 
   /// Returns the domain names as a comma separated list
   static String toNames(List<Domain> domains) =>
@@ -18,4 +21,7 @@ class Domain {
   /// a name of [name]
   static bool contains(List<Domain> domains, String name) =>
       domains.any((domain) => domain.name == name);
+
+  @override
+  String toString() => '$name : $email';
 }

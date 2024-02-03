@@ -1,10 +1,14 @@
 import 'package:basic_utils/basic_utils.dart';
 
+/// A PEM Key pair (private/public).
 class PEMKeyPair {
+  /// PEM of the private key.
+  final String privateKeyPEM;
+
+  /// PEM of the public key.
+  final String publicKeyPEM;
   PEMKeyPair(this.privateKeyPEM, this.publicKeyPEM,
       [this._privateKey, this._publicKey]);
-  final String privateKeyPEM;
-  final String publicKeyPEM;
 
   RSAPrivateKey? _privateKey;
 

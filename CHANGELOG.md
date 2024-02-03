@@ -1,9 +1,20 @@
-## 2.0.0
-- BREAKING: moved the port, securePort and bindingAddress from  the startServer 
+## 2.0.
+
+- BREAKING: Moved the port, securePort and bindingAddress from the startServer
   method to the LetsEncrypt constructor.
+- Added new version of startServer which takes a list of Domains rather than a
+  map of domain/emails. This should make
+  the API clearer.
+- Deprecated startSecureServer in favour of startServer. startSecureServer will be removed in `v2.1.0`.
 - Fixed a number of bugs where an alternate port was being ignored.
-- Added new version of startServer which takes a list of Domains rather than a map of domain/emails. This should make the API clearer.
-- deprecated startSecureServer in favour of startServer. startSecureServer will be removed in 2.1.0
+
+- acme_client: ^1.3.0
+- basic_utils: ^5.7.0
+- coverage: ^1.7.2
+
+- cron: ^0.5.1
+- lints: ^3.0.0
+- test: ^1.24.9
 
 ## 1.2.2
 

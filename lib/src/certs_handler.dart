@@ -11,11 +11,6 @@ import '../shelf_letsencrypt.dart';
 ///
 /// Used by [LetsEncrypt].
 abstract class CertificatesHandler {
-  CertificatesHandler(
-      {this.accountDirectory = defaultAccountDirectoryName,
-      this.privateKeyPEMFileName = defaultPrivateKeyPEMFileName,
-      this.publicKeyPEMFileName = defaultPublicKeyPEMFileName,
-      this.fullChainPEMFileName = defaultFullChainPEMFileName});
   static const String defaultAccountDirectoryName = 'account';
 
   static const String defaultPrivateKeyPEMFileName = 'privkey.pem';
@@ -35,6 +30,12 @@ abstract class CertificatesHandler {
 
   /// The file name of a full-chain PEM file.
   final String fullChainPEMFileName;
+
+  CertificatesHandler(
+      {this.accountDirectory = defaultAccountDirectoryName,
+      this.privateKeyPEMFileName = defaultPrivateKeyPEMFileName,
+      this.publicKeyPEMFileName = defaultPublicKeyPEMFileName,
+      this.fullChainPEMFileName = defaultFullChainPEMFileName});
 
   /// Builds a SecurityContext for [domains] that can be used in a
   /// secure [HttpServer] and [LetsEncrypt].
@@ -253,13 +254,13 @@ abstract class CertificatesHandler {
 
 /// Holds [domains] certificates to load into a [SecurityContext].
 abstract class DomainCertificate {
+  /// The domains of the certificates.
+  late final List<String> domains;
+
   DomainCertificate(Iterable<String> domains) {
     final domainsList = domains.toList().toSet().toList()..sort();
     this.domains = domainsList;
   }
-
-  /// The domains of the certificates.
-  late final List<String> domains;
 
   /// The full-chain certificates in PEM format.
   String get fullChainPEM;
@@ -297,13 +298,14 @@ abstract class DomainCertificate {
 
 /// A [DomainCertificate] implementation using PEM content.
 class DomainCertificatePEM extends DomainCertificate {
-  DomainCertificatePEM(
-      List<String> super.domains, this.fullChainPEM, this.privateKeyPEM);
   @override
   final String fullChainPEM;
 
   @override
   final String privateKeyPEM;
+
+  DomainCertificatePEM(
+      List<String> super.domains, this.fullChainPEM, this.privateKeyPEM);
 
   @override
   void define(SecurityContext securityContext) {

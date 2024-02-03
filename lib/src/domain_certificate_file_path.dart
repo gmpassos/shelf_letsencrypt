@@ -5,11 +5,12 @@ import 'certs_handler.dart';
 
 /// A [DomainCertificate] implementation using file paths.
 class DomainCertificateFilePath extends DomainCertificate {
-  DomainCertificateFilePath(List<String> super.domains, this.fullChainFilePath,
-      this.privateKeyFilePath);
   final String fullChainFilePath;
 
   final String privateKeyFilePath;
+
+  DomainCertificateFilePath(List<String> super.domains, this.fullChainFilePath,
+      this.privateKeyFilePath);
 
   @override
   String get fullChainPEM => File(fullChainFilePath).readAsStringSync();

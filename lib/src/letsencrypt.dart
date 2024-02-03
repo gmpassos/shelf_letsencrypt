@@ -15,6 +15,10 @@ import 'logging.dart';
 
 /// Let's Encrypt certificate tool.
 class LetsEncrypt {
+  final int port;
+  final int securePort;
+  final String bindingAddress;
+
   LetsEncrypt(this.certificatesHandler,
       {this.port = 80,
       this.securePort = 443,
@@ -22,10 +26,6 @@ class LetsEncrypt {
       this.production = false,
       Logging? log})
       : logger = Logger(log);
-
-  final int port;
-  final int securePort;
-  final String bindingAddress;
 
   Logger logger;
 
