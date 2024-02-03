@@ -1,3 +1,10 @@
+## 2.0.0
+- BREAKING: moved the port, securePort and bindingAddress from  the startServer 
+  method to the LetsEncrypt constructor.
+- Fixed a number of bugs where an alternate port was being ignored.
+- Added new version of startServer which takes a list of Domains rather than a map of domain/emails. This should make the API clearer.
+- deprecated startSecureServer in favour of startServer. startSecureServer will be removed in 2.1.0
+
 ## 1.2.2
 
 - `LetsEncrypt`:

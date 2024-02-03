@@ -1,6 +1,8 @@
+// ignore_for_file: avoid_catches_without_on_clauses
+
 import 'dart:io';
 
-import 'package:basic_utils/basic_utils.dart';
+import 'package:basic_utils/basic_utils.dart' hide Domain;
 import 'package:path/path.dart' as pack_path;
 import 'package:shelf/shelf.dart';
 import 'package:shelf_letsencrypt/shelf_letsencrypt.dart';
@@ -15,34 +17,35 @@ void main() {
     });
 
     test('basic', () async {
-      var domain = 'foo.com';
-      var email = 'contact@foo.com';
+      const domain = Domain(name: 'foo.com', email: 'contact@foo.com');
 
-      var certificatesHandler = CertificatesHandlerIO(
+      final certificatesHandler = CertificatesHandlerIO(
           Directory(pack_path.join(tmpDir.path, 'certs-1')));
 
       expect(await certificatesHandler.getAccountPEMKeyPair(), isNull);
-      expect(await certificatesHandler.getDomainPEMKeyPair(domain), isNull);
+      expect(
+          await certificatesHandler.getDomainPEMKeyPair(domain.name), isNull);
       expect(await certificatesHandler.buildSecurityContext([domain]), isNull);
 
-      var accountPEMKeyPair =
+      final accountPEMKeyPair =
           await certificatesHandler.ensureAccountPEMKeyPair();
 
       expect(accountPEMKeyPair, isNotNull);
       expect(accountPEMKeyPair.publicKey, isNotNull);
       expect(accountPEMKeyPair.privateKey, isNotNull);
 
-      var domainPEMKeyPair =
-          await certificatesHandler.ensureDomainPEMKeyPair(domain);
+      final domainPEMKeyPair =
+          await certificatesHandler.ensureDomainPEMKeyPair(domain.name);
       expect(domainPEMKeyPair, isNotNull);
       expect(domainPEMKeyPair.publicKey, isNotNull);
       expect(domainPEMKeyPair.privateKey, isNotNull);
 
-      var csr = (await certificatesHandler.generateCSR(domain, email))!;
+      final csr =
+          (await certificatesHandler.generateCSR(domain.name, domain.email))!;
       expect(csr, isNotEmpty);
 
       // self sign:
-      var csrSign = CryptoUtils.rsaSign(
+      final csrSign = CryptoUtils.rsaSign(
           domainPEMKeyPair.privateKey, CryptoUtils.getBytesFromPEMString(csr));
 
       expect(csrSign, isNotEmpty);
@@ -61,32 +64,29 @@ void main() {
     });
 
     test('basic', () async {
-      var certificatesHandler = CertificatesHandlerIO(
+      final certificatesHandler = CertificatesHandlerIO(
           Directory(pack_path.join(tmpDir.path, 'certs-2')));
 
-      var letsEncrypt = LetsEncrypt(certificatesHandler);
+      final letsEncrypt = LetsEncrypt(certificatesHandler);
 
       expect(letsEncrypt.production, isFalse);
 
       expect(letsEncrypt.apiBaseURL,
           allOf(contains('letsencrypt.org'), contains('staging')));
 
-      var checkCertificateStatus = await letsEncrypt.checkCertificate(
-        'localhost',
-        'contact@localhost',
-        requestCertificate: false,
-        forceRequestCertificate: false,
-        retryInterval: Duration(milliseconds: 1),
+      final checkCertificateStatus = await letsEncrypt.checkCertificate(
+        const Domain(name: 'localhost', email: 'contact@localhost'),
+        retryInterval: const Duration(milliseconds: 1),
       );
 
       expect(checkCertificateStatus, equals(CheckCertificateStatus.invalid));
     });
 
     test('ACME path + processACMEChallengeRequest', () async {
-      var certificatesHandler = CertificatesHandlerIO(
+      final certificatesHandler = CertificatesHandlerIO(
           Directory(pack_path.join(tmpDir.path, 'certs-3')));
 
-      var letsEncrypt = LetsEncrypt(certificatesHandler);
+      final letsEncrypt = LetsEncrypt(certificatesHandler);
 
       expect(
           LetsEncrypt.isACMEPath(
@@ -105,31 +105,31 @@ void main() {
       expect(LetsEncrypt.isACMEPath('/any/path'), isFalse);
 
       {
-        var uri = Uri.parse(
+        final uri = Uri.parse(
             'http://foo.com/.well-known/acme-challenge/Y73s3McbchxLs_NklRfW6HebjYrBmbVeKm0c9jbn3QI');
-        var request = Request('GET', uri, headers: {'host': 'foo.com'});
+        final request = Request('GET', uri, headers: {'host': 'foo.com'});
 
         // No challenge token expected:
-        var response = letsEncrypt.processACMEChallengeRequest(request);
+        final response = letsEncrypt.processACMEChallengeRequest(request);
         expect(response.statusCode, equals(404));
       }
 
       {
-        var uri = Uri.parse(
+        final uri = Uri.parse(
             'http://foo.com/.well-known/acme-challenge/Y73s3McbchxLs_NklRfW6HebjYrBmbVeKm0c9jbn3QI');
-        var request = Request('GET', uri, headers: {'host': 'foo.com:8080'});
+        final request = Request('GET', uri, headers: {'host': 'foo.com:8080'});
 
         // No challenge token expected:
-        var response = letsEncrypt.processACMEChallengeRequest(request);
+        final response = letsEncrypt.processACMEChallengeRequest(request);
         expect(response.statusCode, equals(404));
       }
     });
 
     test('Self check path', () async {
-      var certificatesHandler = CertificatesHandlerIO(
+      final certificatesHandler = CertificatesHandlerIO(
           Directory(pack_path.join(tmpDir.path, 'certs-3')));
 
-      var letsEncrypt = LetsEncrypt(certificatesHandler);
+      final letsEncrypt = LetsEncrypt(certificatesHandler);
 
       expect(
           LetsEncrypt.isWellKnownPath('/.well-known/check/123456789'), isTrue);
@@ -142,32 +142,32 @@ void main() {
       expect(LetsEncrypt.isSelfCheckPath('/any/path'), isFalse);
 
       {
-        var uri = Uri.parse('http://foo.com/.well-known/check/123456789');
-        var request = Request('GET', uri, headers: {'host': 'foo.com'});
+        final uri = Uri.parse('http://foo.com/.well-known/check/123456789');
+        final request = Request('GET', uri, headers: {'host': 'foo.com'});
 
-        var response = letsEncrypt.processSelfCheckRequest(request);
+        final response = letsEncrypt.processSelfCheckRequest(request);
         expect(response.statusCode, equals(200));
       }
     });
 
     test('serve', () async {
-      var certificatesHandler = CertificatesHandlerIO(
+      final certificatesHandler = CertificatesHandlerIO(
           Directory(pack_path.join(tmpDir.path, 'certs-4')));
 
-      var letsEncrypt = LetsEncrypt(certificatesHandler);
+      final letsEncrypt = LetsEncrypt(
+        certificatesHandler,
+        port: 9180,
+        securePort: 9143,
+      );
 
       expect(letsEncrypt.production, isFalse);
 
       StateError? error;
       try {
-        await letsEncrypt.startSecureServer(
+        await letsEncrypt.startServer(
           (request) => Response.ok('Requested: ${request.requestedUri}'),
-          {'localhost': 'contact@localhost'},
-          port: 9180,
-          securePort: 9143,
-          checkCertificate: true,
+          [const Domain(name: 'localhost', email: 'contact@localhost')],
           requestCertificate: false,
-          forceRequestCertificate: false,
         );
       } catch (e) {
         error = e as StateError;

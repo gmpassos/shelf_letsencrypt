@@ -17,7 +17,65 @@
 
 [letsencrypt]: https://letsencrypt.org/
 
-## Usage
+# Developing with shelf_letsencrypt
+LetsEncrypt provide a few challenges for your development enviroment. 
+Read on for a few hints.
+
+## A word of caution
+LetsEncrypt rate limits the issuing of production certificates.
+It is very easy to get locked out of letsencrypt for an extended period of time (days)
+leaving you in the situation where you can't issue a production certificate.
+
+CRITICAL: you could end up with your production systems down for days!!!!
+
+I would advise you to read up on the Lets Encrypt rate limits:
+
+https://letsencrypt.org/docs/rate-limits/
+
+To avoid this (potentially) major issue make certain that you test with a STAGING
+certificate.
+
+
+You do this by passing in 'production: false' (the default) when creating
+the LetsEncrypt certificate.
+Staging certificates still have rate limits but they are much more generours
+
+```dart 
+final LetsEncrypt letsEncrypt = LetsEncrypt(certificatesHandler, production: false);
+```
+
+
+## Permissions
+On Linux you need to be root (sudo) to open a port below 1024. If you try
+to start your server with the default ports (80, 443) you will fail.
+
+
+## NAT for your Development environment
+To issue a certificate LetsEncrypt needs to be able to connect to your
+webserver on port 80.
+This will work fine in production (with the write firewall rules) but in 
+a development environment can be a bit tricky.
+
+The above Permission limitations add to the complication. 
+
+The easist way to do this is (for dev):
+1) start your server on ports 8080 and 8443 (or any pair above 1024)
+2) set up two NATS on your router that forward ports to your dev machine.
+   80 -> 8080
+   443 -> 8443
+
+
+## DNS for development
+For Lets Encrypt to issue a certificate it must be able to resolve the domain
+name of the certificate that you are requesting.
+
+To avoid tampering with your production DNS I keep a cheap domain name that I 
+use in test. 
+I then use cloudflare's free DNS hosting service to host the domain name which
+allows me to add the necessary A record which points to my WFH router on which
+I've configured the above NAT.
+
+# Usage
 
 To use the `LetsEncrypt` class
 
@@ -28,17 +86,24 @@ import 'package:shelf/shelf.dart';
 import 'package:shelf_letsencrypt/shelf_letsencrypt.dart';
 
 void main(List<String> args) async {
-  var domain = args[0]; // Domain for the HTTPS certificate.
-  var domainEmail = args[1];
-  var certificatesDirectory = args.length > 2 ? args[2] : null; // Optional argument.
+  final domainsArg = args[0]; // Domain for the HTTPS certificate.
+  final domainsEmailArg = args[1];
+  var certificatesDirectory =
+      args.length > 2 ? args[2] : null; // Optional argument.
 
   certificatesDirectory ??= '/etc/letsencrypt/live'; // Default directory.
+
+    final domains = _extractDomainsFromArgs(domainsArg,domainsEmailArg);
 
   // The Certificate handler, storing at `certificatesDirectory`.
   final certificatesHandler = CertificatesHandlerIO(Directory(certificatesDirectory));
 
   // The Let's Encrypt integration tool in `staging` mode:
-  final LetsEncrypt letsEncrypt = LetsEncrypt(certificatesHandler, production: false);
+  final LetsEncrypt letsEncrypt = LetsEncrypt(certificatesHandler
+    , production: false
+    , port: 80
+    , securePort: 443
+);
 
   // `shelf` Pipeline:
   var pipeline = const Pipeline().addMiddleware(logRequests());
@@ -46,9 +111,7 @@ void main(List<String> args) async {
 
   var servers = await letsEncrypt.startSecureServer(
     handler,
-    {domain: domainEmail},
-    port: 80,
-    securePort: 443,
+    domains,
   );
 
   var server = servers[0]; // HTTP Server.
@@ -62,10 +125,45 @@ void main(List<String> args) async {
   print('Serving at https://${serverSecure.address.host}:${serverSecure.port}');
 }
 
+/// splits the command line arguments into a list of [Domain]s
+/// containing the domain name and and domain email addresses.
+List<Domain> _extractDomainsFromArgs(
+    String domainsArg, String domainsEmailArg) {
+  final domainDelimiter = RegExp(r'\s*[;:,]\s*');
+  final domainList = domainsArg.split(domainDelimiter);
+  final domainEmailList = domainsEmailArg.split(domainDelimiter);
+
+  if (domainList.length != domainEmailList.length) {
+    stderr.writeln(
+        "The number of domains doesn't match the number of domain emails");
+    exit(1);
+  }
+
+  final domains = <Domain>[];
+
+  var i = 0;
+  for (final domain in domainList) {
+    domains.add(Domain(name: domain, email: domainEmailList[i++]));
+  }
+  return domains;
+}
+
 Response _processRequest(Request request) {
   return Response.ok('Requested: ${request.requestedUri}');
 }
 ```
+
+## renewals
+Each time your call startServer it will check if any certificates need to
+be renewed in the next 5 days (or if they are expired) and renew the
+certificate.
+
+This however isn't sufficient for any long running service.
+
+The example includes a renewal service that does a daily check if any certificate
+need renewing.
+If a cert needs to be renewed, it will renew it and then gracefully restart
+the server with the new certs.
 
 ## Source
 
@@ -109,6 +207,7 @@ with your 1 hour.*
 # Author
 
 Graciliano M. Passos: [gmpassos@GitHub][github].
+Brett Sutton [bsutton@GitHub][github]
 
 [github]: https://github.com/gmpassos
 
