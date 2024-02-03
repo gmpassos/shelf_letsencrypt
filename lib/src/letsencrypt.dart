@@ -279,13 +279,16 @@ class LetsEncrypt {
     for (var entry in domainsAndEmails.entries) {
       domains.add(Domain(name: entry.key, email: entry.value));
     }
-    return startServer(handler, domains,
+
+    var servers = await startServer(handler, domains,
         backlog: backlog,
         shared: shared,
         checkCertificate: checkCertificate,
         requestCertificate: requestCertificate,
         forceRequestCertificate: forceRequestCertificate,
         loadAllHandledDomains: loadAllHandledDomains);
+
+    return [servers.http, servers.https];
   }
 
   /// Starts 2 [HttpServer] instances, one HTTP at [port]
@@ -293,12 +296,15 @@ class LetsEncrypt {
   ///
   /// - If [checkCertificate] is `true`, will check the current certificate
   /// - if [requestCertificate] is `true` then we will  acquire/renew the certificate
-  ///  as needed.
+  ///   as needed.
   /// - If [forceRequestCertificate] is `true` then we will force the acquistion
-  /// of a new certificate. WARNING: the Lets Encrypt CA has VERY tight rate limits
+  ///   of a new certificate.
+  ///
+  /// *WARNING: the Lets Encrypt CA has VERY tight rate limits
   /// on certificate acquistion. If you breach them you will not be able to
-  /// acquire a new production certificate for 168 hours!!!!
-  Future<List<HttpServer>> startServer(Handler handler, List<Domain> domains,
+  /// acquire a new production certificate for 168 hours!!!*
+  Future<({HttpServer http, HttpServer https})> startServer(
+      Handler handler, List<Domain> domains,
       {int? backlog,
       bool shared = false,
       bool checkCertificate = true,
@@ -306,7 +312,7 @@ class LetsEncrypt {
       bool forceRequestCertificate = false,
       bool loadAllHandledDomains = false}) async {
     logger.info(
-        '''Starting server> bindingAddress: $bindingAddress ; port: $port ; domain: $domains''');
+        "Starting server> bindingAddress: $bindingAddress ; port: $port ; domain: $domains");
 
     FutureOr<Response> handlerWithChallenge(Request r) {
       final path = r.requestedUri.path;
@@ -411,7 +417,7 @@ class LetsEncrypt {
       }
     }
 
-    return [server, secureServer];
+    return (http: server, https: secureServer);
   }
 
   /// Checks the [domain] certificate.

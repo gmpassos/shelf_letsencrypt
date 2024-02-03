@@ -1,5 +1,40 @@
 /// A [LetsEncrypt] domain.
 class Domain {
+  /// The default delimiter for [fromDomainsNamesAndEmailsArgs].
+  static RegExp defaultArgDelimiter = RegExp(r'\s*[;:,]\s*');
+
+  /// Splits the arguments [domainNamesArg] and [domainEmailsArg] using the
+  /// specified [delimiter] pattern and creates a list of [Domain]s.
+  /// - If [delimiter] is not provided, the [defaultArgDelimiter] is used.
+  /// - See [fromDomainsNamesAndEmails].
+  static List<Domain> fromDomainsNamesAndEmailsArgs(
+      String domainNamesArg, String domainEmailsArg,
+      {RegExp? delimiter}) {
+    delimiter ??= defaultArgDelimiter;
+
+    final domainNames = domainNamesArg.split(delimiter);
+    final domainEmails = domainEmailsArg.split(delimiter);
+
+    return fromDomainsNamesAndEmails(domainNames, domainEmails);
+  }
+
+  /// Generates a list of [Domain] instances from pairs in the sequence of
+  /// [domainNames] and [domainEmails].
+  static List<Domain> fromDomainsNamesAndEmails(
+      List<String> domainNames, List<String> domainEmails) {
+    if (domainNames.length != domainEmails.length) {
+      throw ArgumentError(
+          "The number of domain names (${domainNames.length}) doesn't match the number of domain emails (${domainEmails.length}).");
+    }
+
+    var domains = List.generate(
+      domainNames.length,
+      (i) => Domain(name: domainNames[i], email: domainEmails[i]),
+    );
+
+    return domains;
+  }
+
   /// The domain name. Ex.: your-domain.com
   final String name;
 
@@ -21,5 +56,5 @@ class Domain {
       domains.any((domain) => domain.name == name);
 
   @override
-  String toString() => '$name : $email';
+  String toString() => '$name: $email';
 }
