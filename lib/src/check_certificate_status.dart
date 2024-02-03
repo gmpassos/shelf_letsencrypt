@@ -1,7 +1,3 @@
-// ignore_for_file: avoid_catches_without_on_clauses
-
-import 'package:shelf_letsencrypt/src/letsencrypt.dart';
-
 /// The [LetsEncrypt.checkCertificate] status.
 enum CheckCertificateStatus {
   ok,

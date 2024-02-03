@@ -1,5 +1,3 @@
-import 'package:shelf_letsencrypt/shelf_letsencrypt.dart';
-
 /// A [LetsEncrypt] domain.
 class Domain {
   /// The domain name. Ex.: your-domain.com

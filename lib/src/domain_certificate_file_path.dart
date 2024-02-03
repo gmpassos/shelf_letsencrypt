@@ -1,12 +1,13 @@
 import 'dart:io';
 
-import '../shelf_letsencrypt.dart';
 import 'certs_handler.dart';
 
 /// A [DomainCertificate] implementation using file paths.
 class DomainCertificateFilePath extends DomainCertificate {
+  /// The fullChain file path.
   final String fullChainFilePath;
 
+  /// The private key file path.
   final String privateKeyFilePath;
 
   DomainCertificateFilePath(List<String> super.domains, this.fullChainFilePath,

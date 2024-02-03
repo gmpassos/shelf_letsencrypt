@@ -1,6 +1,5 @@
 import 'dart:io';
 
-import '../shelf_letsencrypt.dart';
 import 'certs_handler.dart';
 
 /// A [SecurityContext] builder.

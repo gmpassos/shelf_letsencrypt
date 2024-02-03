@@ -1,5 +1,3 @@
-// ignore_for_file: avoid_catches_without_on_clauses
-
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -7,9 +5,9 @@ import 'dart:io';
 import 'package:acme_client/acme_client.dart';
 import 'package:shelf/shelf.dart';
 import 'package:shelf/shelf_io.dart';
-import 'package:shelf_letsencrypt/src/check_certificate_status.dart';
 
 import 'certs_handler.dart';
+import 'check_certificate_status.dart';
 import 'domain.dart';
 import 'logging.dart';
 
