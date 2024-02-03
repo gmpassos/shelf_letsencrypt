@@ -1,4 +1,4 @@
-## 2.0.
+## 2.0.0
 
 - BREAKING: Moved the port, securePort and bindingAddress from the startServer
   method to the LetsEncrypt constructor.
@@ -10,8 +10,8 @@
 
 - acme_client: ^1.3.0
 - basic_utils: ^5.7.0
-- coverage: ^1.7.2
 
+- coverage: ^1.7.2
 - cron: ^0.5.1
 - lints: ^3.0.0
 - test: ^1.24.9
