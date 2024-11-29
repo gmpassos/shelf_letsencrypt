@@ -5,7 +5,11 @@ import 'package:basic_utils/basic_utils.dart' hide Domain;
 import 'package:collection/collection.dart';
 import 'package:path/path.dart' as pack_path;
 
-import '../shelf_letsencrypt.dart';
+import 'certs_handler.dart';
+import 'domain.dart';
+import 'domain_certificate_file_path.dart';
+import 'pem_key_pair.dart';
+import 'security_context_builder.dart';
 
 /// A [CertificatesHandler] implementation using [dart:io].
 class CertificatesHandlerIO extends CertificatesHandler {
@@ -73,16 +77,27 @@ class CertificatesHandlerIO extends CertificatesHandler {
   String _pathFileName(String path) => pack_path.split(path).last;
 
   @override
-  Future<SecurityContext?> buildSecurityContext(List<Domain> domains,
-      {bool loadAllHandledDomains = true}) async {
+  Future<Map<String, SecurityContext>?> buildSecurityContexts(
+      List<Domain> domains,
+      {bool allowUnresolvedDomain = false,
+      bool loadAllHandledDomains = true}) async {
     final securityContextBuilder = SecurityContextBuilder();
+
+    var resolvedDomains = <Domain>{};
+    var unresolvedDomains = <Domain>{};
 
     for (final domain in domains) {
       final domainOk =
           await _useDomainCertificate(securityContextBuilder, domain.name);
-      if (!domainOk) {
-        return null;
+      if (domainOk) {
+        resolvedDomains.add(domain);
+      } else {
+        unresolvedDomains.add(domain);
       }
+    }
+
+    if (unresolvedDomains.isNotEmpty && !allowUnresolvedDomain) {
+      return null;
     }
 
     if (loadAllHandledDomains) {
@@ -95,8 +110,8 @@ class CertificatesHandlerIO extends CertificatesHandler {
       }
     }
 
-    final securityContext = securityContextBuilder.build();
-    return securityContext;
+    final securityContexts = securityContextBuilder.buildAll();
+    return securityContexts;
   }
 
   Future<bool> _useDomainCertificate(

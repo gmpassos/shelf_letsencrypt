@@ -5,17 +5,13 @@ import 'dart:io';
 import 'package:basic_utils/basic_utils.dart' hide Domain;
 import 'package:collection/collection.dart';
 
-import '../shelf_letsencrypt.dart';
+import 'domain.dart';
+import 'pem_key_pair.dart';
 
 /// Base class for a certificate handler.
 ///
 /// Used by [LetsEncrypt].
 abstract class CertificatesHandler {
-  CertificatesHandler(
-      {this.accountDirectory = defaultAccountDirectoryName,
-      this.privateKeyPEMFileName = defaultPrivateKeyPEMFileName,
-      this.publicKeyPEMFileName = defaultPublicKeyPEMFileName,
-      this.fullChainPEMFileName = defaultFullChainPEMFileName});
   static const String defaultAccountDirectoryName = 'account';
 
   static const String defaultPrivateKeyPEMFileName = 'privkey.pem';
@@ -36,15 +32,24 @@ abstract class CertificatesHandler {
   /// The file name of a full-chain PEM file.
   final String fullChainPEMFileName;
 
-  /// Builds a SecurityContext for [domains] that can be used in a
-  /// secure [HttpServer] and [LetsEncrypt].
+  CertificatesHandler(
+      {this.accountDirectory = defaultAccountDirectoryName,
+      this.privateKeyPEMFileName = defaultPrivateKeyPEMFileName,
+      this.publicKeyPEMFileName = defaultPublicKeyPEMFileName,
+      this.fullChainPEMFileName = defaultFullChainPEMFileName});
+
+  /// Builds a [Map] of [SecurityContext] objects for the given [domains],
+  /// which can be used in a secure [HttpServer] and with [LetsEncrypt].
   ///
-  /// If this instance doesn't have a valid certificate
-  /// for [domains] it will return `null`.
+  /// If `allowUnresolvedDomain` is set to `true` and any domain cannot be resolved,
+  /// it will return `null`. Otherwise, it will return the [SecurityContext]
+  /// for the resolved domains.
   ///
   /// See [LetsEncrypt.startServer].
-  FutureOr<SecurityContext?> buildSecurityContext(List<Domain> domains,
-      {bool loadAllHandledDomains = true});
+  FutureOr<Map<String, SecurityContext>?> buildSecurityContexts(
+      List<Domain> domains,
+      {bool allowUnresolvedDomain = false,
+      bool loadAllHandledDomains = true});
 
   /// Returns a [List] of all the handled domains.
   List<String> listAllHandledDomains({bool checkSecurityContext = true});
@@ -190,7 +195,7 @@ abstract class CertificatesHandler {
 
   /// Saves a signed certificate chain for [cn].
   ///
-  /// This is used by [buildSecurityContext] to construct
+  /// This is used by [buildSecurityContexts] to construct
   /// a [SecurityContext] for a secure [HttpServer].
   Future<bool> saveSignedCertificateChain(
       String cn, List<String> signedCertificatesChain);
@@ -253,13 +258,13 @@ abstract class CertificatesHandler {
 
 /// Holds [domains] certificates to load into a [SecurityContext].
 abstract class DomainCertificate {
+  /// The domains of the certificates.
+  late final List<String> domains;
+
   DomainCertificate(Iterable<String> domains) {
     final domainsList = domains.toList().toSet().toList()..sort();
     this.domains = domainsList;
   }
-
-  /// The domains of the certificates.
-  late final List<String> domains;
 
   /// The full-chain certificates in PEM format.
   String get fullChainPEM;
@@ -297,13 +302,14 @@ abstract class DomainCertificate {
 
 /// A [DomainCertificate] implementation using PEM content.
 class DomainCertificatePEM extends DomainCertificate {
-  DomainCertificatePEM(
-      List<String> super.domains, this.fullChainPEM, this.privateKeyPEM);
   @override
   final String fullChainPEM;
 
   @override
   final String privateKeyPEM;
+
+  DomainCertificatePEM(
+      List<String> super.domains, this.fullChainPEM, this.privateKeyPEM);
 
   @override
   void define(SecurityContext securityContext) {

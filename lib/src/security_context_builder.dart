@@ -1,27 +1,25 @@
 import 'dart:io';
 
-import '../shelf_letsencrypt.dart';
 import 'certs_handler.dart';
 
 /// A [SecurityContext] builder.
 class SecurityContextBuilder {
-  static bool defineMerged = false;
+  final Set<DomainCertificate> domainsCertificates;
 
-  final Set<DomainCertificate> domainsCertificates = <DomainCertificate>{};
+  SecurityContextBuilder([Iterable<DomainCertificate>? domainsCertificates])
+      : domainsCertificates = domainsCertificates?.toSet() ?? {};
 
-  SecurityContext build() {
-    final securityContext = SecurityContext();
+  Map<String, SecurityContext> buildAll() {
+    var entries = domainsCertificates
+        .expand((domainCertificate) {
+          var securityContext = SecurityContext();
+          domainCertificate.define(securityContext);
+          return domainCertificate.domains
+              .map((domain) => MapEntry(domain, securityContext));
+        })
+        .toSet()
+        .toList();
 
-    if (defineMerged) {
-      domainsCertificates
-          .reduce((value, element) => value.merge(element))
-          .define(securityContext);
-    } else {
-      for (final d in domainsCertificates) {
-        d.define(securityContext);
-      }
-    }
-
-    return securityContext;
+    return Map.fromEntries(entries);
   }
 }
