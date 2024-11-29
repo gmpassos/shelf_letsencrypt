@@ -176,7 +176,7 @@ void main() {
       expect(error, isNotNull);
       expect(
           error?.message,
-          allOf(contains('No previous SecureContext'),
+          allOf(contains("Can't load all `SecurityContext`s"),
               contains("can't request")));
     });
 
