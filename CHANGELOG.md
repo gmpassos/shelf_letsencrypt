@@ -8,6 +8,12 @@
 - Deprecated startSecureServer in favour of startServer. startSecureServer will be removed in `v2.1.0`.
 - Fixed a number of bugs where an alternate port was being ignored.
 
+- `SecurityContextBuilder`:
+  - Changed `build` to `buildAll`, returning a `Map<String, SecurityContext>`.
+
+- `LetsEncrypt.startServer`:
+  - Now receives a `Map<String, SecurityContext> securityContexts` and an optional `SecurityContext? defaultSecurityContext`.
+
 - acme_client: ^1.3.0
 - basic_utils: ^5.7.0
 - path: ^1.9.1

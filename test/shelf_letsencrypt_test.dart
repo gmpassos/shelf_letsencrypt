@@ -25,7 +25,7 @@ void main() {
       expect(await certificatesHandler.getAccountPEMKeyPair(), isNull);
       expect(
           await certificatesHandler.getDomainPEMKeyPair(domain.name), isNull);
-      expect(await certificatesHandler.buildSecurityContext([domain]), isNull);
+      expect(await certificatesHandler.buildSecurityContexts([domain]), isNull);
 
       final accountPEMKeyPair =
           await certificatesHandler.ensureAccountPEMKeyPair();

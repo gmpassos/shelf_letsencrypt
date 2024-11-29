@@ -38,15 +38,18 @@ abstract class CertificatesHandler {
       this.publicKeyPEMFileName = defaultPublicKeyPEMFileName,
       this.fullChainPEMFileName = defaultFullChainPEMFileName});
 
-  /// Builds a SecurityContext for [domains] that can be used in a
-  /// secure [HttpServer] and [LetsEncrypt].
+  /// Builds a [Map] of [SecurityContext] objects for the given [domains],
+  /// which can be used in a secure [HttpServer] and with [LetsEncrypt].
   ///
-  /// If this instance doesn't have a valid certificate
-  /// for [domains] it will return `null`.
+  /// If `allowUnresolvedDomain` is set to `true` and any domain cannot be resolved,
+  /// it will return `null`. Otherwise, it will return the [SecurityContext]
+  /// for the resolved domains.
   ///
   /// See [LetsEncrypt.startServer].
-  FutureOr<SecurityContext?> buildSecurityContext(List<Domain> domains,
-      {bool loadAllHandledDomains = true});
+  FutureOr<Map<String, SecurityContext>?> buildSecurityContexts(
+      List<Domain> domains,
+      {bool allowUnresolvedDomain = false,
+      bool loadAllHandledDomains = true});
 
   /// Returns a [List] of all the handled domains.
   List<String> listAllHandledDomains({bool checkSecurityContext = true});
@@ -192,7 +195,7 @@ abstract class CertificatesHandler {
 
   /// Saves a signed certificate chain for [cn].
   ///
-  /// This is used by [buildSecurityContext] to construct
+  /// This is used by [buildSecurityContexts] to construct
   /// a [SecurityContext] for a secure [HttpServer].
   Future<bool> saveSignedCertificateChain(
       String cn, List<String> signedCertificatesChain);
