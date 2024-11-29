@@ -1,4 +1,4 @@
-## 2.0.0
+## 2.0.0-beta.1
 
 - BREAKING: Moved the port, securePort and bindingAddress from the startServer
   method to the LetsEncrypt constructor.
