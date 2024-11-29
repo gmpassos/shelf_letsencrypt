@@ -10,11 +10,14 @@
 
 - acme_client: ^1.3.0
 - basic_utils: ^5.7.0
+- path: ^1.9.1
+- shelf: ^1.4.2
 
-- coverage: ^1.7.2
+- dependency_validator: ^3.2.3
+- coverage: ^1.11.0
 - cron: ^0.5.1
 - lints: ^3.0.0
-- test: ^1.24.9
+- test: ^1.25.9
 
 ## 1.2.2
 
