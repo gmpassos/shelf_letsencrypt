@@ -13,3 +13,5 @@ pubspec.lock
 
 .history
 .failed_tracker
+
+.DS_Store

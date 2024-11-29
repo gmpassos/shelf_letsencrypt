@@ -1,5 +1,5 @@
 name: shelf_letsencrypt
-version: 2.0.0
+version: 2.0.0-beta.1
 homepage: https://github.com/gmpassos/shelf_letsencrypt
 description: Let's Encrypt support for the shelf package (free and automatic HTTPS certificate support).
 
