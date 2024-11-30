@@ -4,9 +4,6 @@ import 'package:cron/cron.dart';
 import 'package:shelf/shelf.dart';
 import 'package:shelf_letsencrypt/shelf_letsencrypt.dart';
 
-late HttpServer server; // HTTP Server.
-late HttpServer serverSecure; // HTTPS Server.
-
 /// Start the example with a list of domains and a reciprocal
 /// e-mail address for the domain admin:
 /// ```dart
@@ -15,8 +12,8 @@ late HttpServer serverSecure; // HTTPS Server.
 ///     info@domain.com:info2@domain.com
 /// ```
 void main(List<String> args) async {
-  final domainNamesArg = args[0]; // Domain for the HTTPS certificate.
-  final domainEmailsArg = args[1]; // The domain e-mail.
+  final domainNamesArg = args[0]; // Domains for the HTTPS certificate.
+  final domainEmailsArg = args[1]; // The domains e-mail.
 
   var certificatesDirectory = args.length > 2
       ? args[2] // Optional argument.
@@ -32,17 +29,18 @@ void main(List<String> args) async {
   // The Let's Encrypt integration tool in `staging` mode:
   final letsEncrypt = LetsEncrypt(
     certificatesHandler,
-    production: false,
+    production: false, // If `true` uses Let's Encrypt production API.
     port: 80,
     securePort: 443,
   );
 
-  await _startServer(letsEncrypt, domains);
+  var servers = await _startServer(letsEncrypt, domains);
 
-  await _startRenewalService(letsEncrypt, domains, server, serverSecure);
+  await _startRenewalService(letsEncrypt, domains, servers.http, servers.https);
 }
 
-Future<void> _startServer(LetsEncrypt letsEncrypt, List<Domain> domains) async {
+Future<({HttpServer http, HttpServer https})> _startServer(
+    LetsEncrypt letsEncrypt, List<Domain> domains) async {
   // Build `shelf` Pipeline:
   final pipeline = const Pipeline().addMiddleware(logRequests());
   final handler = pipeline.addHandler(_processRequest);
@@ -54,8 +52,8 @@ Future<void> _startServer(LetsEncrypt letsEncrypt, List<Domain> domains) async {
     loadAllHandledDomains: true,
   );
 
-  server = servers.http; // HTTP Server.
-  serverSecure = servers.https; // HTTPS Server.
+  var server = servers.http; // HTTP Server.
+  var serverSecure = servers.https; // HTTPS Server.
 
   // Enable gzip:
   server.autoCompress = true;
@@ -63,6 +61,8 @@ Future<void> _startServer(LetsEncrypt letsEncrypt, List<Domain> domains) async {
 
   print('Serving at http://${server.address.host}:${server.port}');
   print('Serving at https://${serverSecure.address.host}:${serverSecure.port}');
+
+  return servers;
 }
 
 /// Check every hour if any of the certificates need to be renewed.
@@ -70,12 +70,14 @@ Future<void> _startRenewalService(LetsEncrypt letsEncrypt, List<Domain> domains,
     HttpServer server, HttpServer secureServer) async {
   Cron().schedule(
       Schedule(hours: '*/1'), // every hour
-      () => refreshIfRequired(letsEncrypt, domains));
+      () => refreshIfRequired(letsEncrypt, domains, server, secureServer));
 }
 
 Future<void> refreshIfRequired(
   LetsEncrypt letsEncrypt,
   List<Domain> domains,
+  HttpServer server,
+  HttpServer secureServer,
 ) async {
   print('-- Checking if any certificates need to be renewed');
 
@@ -95,7 +97,7 @@ Future<void> refreshIfRequired(
 
   if (restartRequired) {
     // Restart the servers:
-    await Future.wait<void>([server.close(), serverSecure.close()]);
+    await Future.wait<void>([server.close(), secureServer.close()]);
     await _startServer(letsEncrypt, domains);
     print('** Services restarted');
   }
