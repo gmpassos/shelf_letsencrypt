@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:acme_client/acme_client.dart';
+import 'package:multi_domain_secure_server/multi_domain_secure_server.dart';
 import 'package:shelf/shelf.dart';
 import 'package:shelf/shelf_io.dart';
 
@@ -312,6 +313,7 @@ class LetsEncrypt {
       Handler handler, List<Domain> domains,
       {int? backlog,
       bool shared = false,
+      bool v6Only = false,
       bool checkCertificate = true,
       bool requestCertificate = true,
       bool forceRequestCertificate = false,
@@ -338,16 +340,47 @@ class LetsEncrypt {
 
     Future<HttpServer> startSecureServer(
         Map<String, SecurityContext> securityContexts,
-        {SecurityContext? defaultSecurityContext}) {
-      defaultSecurityContext ??= securityContexts['*'] ??
+        {int? backlog,
+        bool v6Only = false,
+        bool shared = false}) async {
+      var defaultSecurityContext = securityContexts['*'] ??
           securityContexts.entries.firstOrNull?.value ??
           (throw ArgumentError(
               "Can't define `defaultSecurityContext`> null `defaultSecurityContext` and empty `securityContexts`"));
 
-      return serve(handlerWithChallenge, bindingAddress, securePort,
+      var hasMultipleDomains = securityContexts.length > 1;
+
+      if (hasMultipleDomains ||
+              v6Only // `shelf` doesn't provide parameter `v6Only`
+          ) {
+        logger.info(
+            '''Starting secure server with `MultiDomainSecureServer`> domains: ${securityContexts.keys.toList()}''');
+
+        var secureServer = await MultiDomainSecureServer.bind(
+          bindingAddress,
+          securePort,
+          backlog: backlog ?? 0,
+          v6Only: v6Only,
+          shared: shared,
+          defaultSecureContext: defaultSecurityContext,
+          securityContextResolver: (hostname) => securityContexts[hostname],
+        );
+
+        var httpServer = HttpServer.listenOn(secureServer.asServerSocket());
+
+        serveRequests(httpServer, handlerWithChallenge);
+
+        return httpServer;
+      } else {
+        return serve(
+          handlerWithChallenge,
+          bindingAddress,
+          securePort,
           securityContext: defaultSecurityContext,
           backlog: backlog,
-          shared: shared);
+          shared: shared,
+        );
+      }
     }
 
     HttpServer? secureServer;
@@ -398,9 +431,11 @@ class LetsEncrypt {
 
       logger.info(
           'Starting secure server> port: $securePort ; domains: $domains');
-      secureServer = await startSecureServer(securityContexts);
+      secureServer = await startSecureServer(securityContexts,
+          backlog: backlog, shared: shared, v6Only: v6Only);
     } else {
-      secureServer = await startSecureServer(securityContexts);
+      secureServer = await startSecureServer(securityContexts,
+          backlog: backlog, shared: shared, v6Only: v6Only);
 
       if (checkCertificate) {
         logger.info('Checking domains certificates: $domains');
@@ -436,7 +471,8 @@ class LetsEncrypt {
 
           logger.warning('Restarting secure server...');
           await secureServer.close(force: true);
-          secureServer = await startSecureServer(securityContexts);
+          secureServer = await startSecureServer(securityContexts,
+              backlog: backlog, shared: shared, v6Only: v6Only);
         }
       }
     }

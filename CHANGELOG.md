@@ -1,3 +1,13 @@
+## 2.0.0-beta.2
+
+- `LetsEncrypt`:
+  - `startServer`:
+    - Added parameter `v6Only`.
+    - Use `MultiDomainSecureServer` if multiple domains are being served.
+
+- multi_domain_secure_server: ^1.0.5
+- dependency_validator: ^4.1.1
+
 ## 2.0.0-beta.1
 
 - BREAKING: Moved the port, securePort and bindingAddress from the startServer
