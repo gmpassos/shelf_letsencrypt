@@ -318,6 +318,19 @@ class LetsEncrypt {
       bool requestCertificate = true,
       bool forceRequestCertificate = false,
       bool loadAllHandledDomains = false}) async {
+    var invalidDomains = domains.where((d) => !d.isValidName).toList();
+
+    if (invalidDomains.isNotEmpty) {
+      logger
+          .info("Ignoring invalid domains: ${Domain.toNames(invalidDomains)}");
+
+      domains.removeWhere((d) => !d.isValidName);
+    }
+
+    if (domains.isEmpty) {
+      throw ArgumentError("Empty `domains`! No valid domain provided.");
+    }
+
     logger.info(
         "Starting server> bindingAddress: $bindingAddress ; port: $port ; domain: $domains");
 

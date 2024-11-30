@@ -1,3 +1,11 @@
+## 2.0.0-beta.3
+
+- `Domain`:
+  - Added `isValidName`.
+
+- `LetsEncrypt`:
+  - `startServer`: ignore invalid domains.
+
 ## 2.0.0-beta.2
 
 - `LetsEncrypt`:

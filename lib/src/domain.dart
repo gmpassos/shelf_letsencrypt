@@ -43,6 +43,11 @@ class Domain {
 
   const Domain({required this.name, required this.email});
 
+  static final regexpDomainName = RegExp(
+      r'^(?!-)[A-Za-z0-9-]{1,63}(?<!-)\.(?!-)([A-Za-z0-9-]{1,63})(\.[A-Za-z]{2,})?$');
+
+  bool get isValidName => regexpDomainName.hasMatch(name);
+
   /// Returns the domain names as a comma separated list
   static String toNames(List<Domain> domains) =>
       domains.map((domain) => domain.name).toList().join(', ');
