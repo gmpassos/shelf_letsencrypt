@@ -162,22 +162,43 @@ void main() {
 
       expect(letsEncrypt.production, isFalse);
 
-      StateError? error;
-      try {
-        await letsEncrypt.startServer(
-          (request) => Response.ok('Requested: ${request.requestedUri}'),
-          [const Domain(name: 'localhost', email: 'contact@localhost')],
-          requestCertificate: false,
-        );
-      } catch (e) {
-        error = e as StateError;
+      {
+        ArgumentError? error;
+        try {
+          await letsEncrypt.startServer(
+            (request) => Response.ok('Requested: ${request.requestedUri}'),
+            [const Domain(name: 'localhost', email: 'contact@localhost')],
+            requestCertificate: false,
+          );
+        } catch (e) {
+          error = e as ArgumentError;
+        }
+
+        expect(error, isNotNull);
+        expect(
+            error?.message,
+            allOf(contains("Empty `domains`"),
+                contains("No valid domain provided")));
       }
 
-      expect(error, isNotNull);
-      expect(
-          error?.message,
-          allOf(contains("Can't load all `SecurityContext`s"),
-              contains("can't request")));
+      {
+        StateError? error;
+        try {
+          await letsEncrypt.startServer(
+            (request) => Response.ok('Requested: ${request.requestedUri}'),
+            [const Domain(name: 'example.com', email: 'contact@example.com')],
+            requestCertificate: false,
+          );
+        } catch (e) {
+          error = e as StateError;
+        }
+
+        expect(error, isNotNull);
+        expect(
+            error?.message,
+            allOf(contains("Can't load all `SecurityContext`s"),
+                contains("can't request")));
+      }
     });
 
     tearDown(() {
