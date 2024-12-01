@@ -375,11 +375,13 @@ class LetsEncrypt {
           backlog: backlog ?? 0,
           v6Only: v6Only,
           shared: shared,
+          requiresHandshakesWithHostname: true,
           defaultSecureContext: defaultSecurityContext,
           securityContextResolver: (hostname) => securityContexts[hostname],
         );
 
-        var httpServer = HttpServer.listenOn(secureServer.asServerSocket());
+        var httpServer = HttpServer.listenOn(
+            secureServer.asServerSocket(useSecureSocket: true));
 
         serveRequests(httpServer, handlerWithChallenge);
 

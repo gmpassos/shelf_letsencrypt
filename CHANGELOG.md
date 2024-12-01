@@ -1,3 +1,13 @@
+## 2.0.0-beta.4
+
+- `LetsEncrypt`:
+  - `startServer`:
+    - `MultiDomainSecureServer`:
+      - Pass `requiresHandshakesWithHostname: true`.
+      - Ensure that `HttpServer.listenOn` receives requests from a `SecureSocket`.
+
+- multi_domain_secure_server: ^1.0.6
+
 ## 2.0.0-beta.3
 
 - `Domain`:
