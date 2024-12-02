@@ -266,9 +266,8 @@ class LetsEncrypt {
     return Response.ok(challengeToken);
   }
 
-  @Deprecated('Use `startServer`. Will be removed at v2.1.0')
-
   /// Use [startServer].
+  @Deprecated('Use `startServer`. Will be removed at v2.1.0')
   Future<List<HttpServer>> startSecureServer(
       Handler handler, Map<String, String> domainsAndEmails,
       {int? backlog,

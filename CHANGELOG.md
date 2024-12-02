@@ -1,3 +1,7 @@
+## 2.0.0-beta.6
+
+- multi_domain_secure_server: ^1.0.8
+
 ## 2.0.0-beta.5
 
 - `LetsEncrypt`:
