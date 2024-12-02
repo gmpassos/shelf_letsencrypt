@@ -1,3 +1,10 @@
+## 2.0.0-beta.5
+
+- `LetsEncrypt`:
+  - `startServer`: use `secureServer.asHttpServer()`
+
+- multi_domain_secure_server: ^1.0.7
+
 ## 2.0.0-beta.4
 
 - `LetsEncrypt`:

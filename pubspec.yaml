@@ -1,5 +1,5 @@
 name: shelf_letsencrypt
-version: 2.0.0-beta.4
+version: 2.0.0-beta.5
 homepage: https://github.com/gmpassos/shelf_letsencrypt
 description: Let's Encrypt support for the shelf package (free and automatic HTTPS certificate support).
 
@@ -10,7 +10,7 @@ dependencies:
   acme_client: ^1.3.0
   basic_utils: ^5.7.0
   collection: ^1.18.0
-  multi_domain_secure_server: ^1.0.6
+  multi_domain_secure_server: ^1.0.7
   path: ^1.9.1
   shelf: ^1.4.2
 

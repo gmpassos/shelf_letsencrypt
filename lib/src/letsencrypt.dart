@@ -380,8 +380,7 @@ class LetsEncrypt {
           securityContextResolver: (hostname) => securityContexts[hostname],
         );
 
-        var httpServer = HttpServer.listenOn(
-            secureServer.asServerSocket(useSecureSocket: true));
+        var httpServer = secureServer.asHttpServer();
 
         serveRequests(httpServer, handlerWithChallenge);
 
