@@ -1,3 +1,7 @@
+## 2.0.0-beta.7
+
+- multi_domain_secure_server: ^1.0.10
+
 ## 2.0.0-beta.6
 
 - multi_domain_secure_server: ^1.0.8
