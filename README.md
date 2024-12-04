@@ -75,6 +75,19 @@ I then use cloudflare's free DNS hosting service to host the domain name which
 allows me to add the necessary A record which points to my WFH router on which
 I've configured the above NAT.
 
+## Multi-Domain Support
+Starting with `shelf_letsencrypt: 2.0.0`, support for multiple domains on the same HTTPS port has been introduced. This
+enhancement allows `shelf_letsencrypt` to manage certificate requests and automatically serve multiple domains
+seamlessly.
+
+This functionality is powered by the [multi_domain_secure_server][pub_multi_domain_secure_server] package (developed
+by [gmpassos][github_gmpassos]), specifically created for `shelf_letsencrypt`. It enables a `SecureServerSocket` to handle
+different `SecurityContext` (certificates) on the same listening port. For more details, check out the source code
+on [GitHub][github_multi_domain_secure_server].
+
+[pub_multi_domain_secure_server]: https://pub.dev/packages/multi_domain_secure_server
+[github_multi_domain_secure_server]: https://github.com/gmpassos/multi_domain_secure_server
+
 # Usage
 
 To use the `LetsEncrypt` class
