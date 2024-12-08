@@ -1,45 +1,23 @@
-## 2.0.0-beta.7
-
-- multi_domain_secure_server: ^1.0.10
-
-## 2.0.0-beta.6
-
-- multi_domain_secure_server: ^1.0.8
-
-## 2.0.0-beta.5
+## 2.0.0
 
 - `LetsEncrypt`:
-  - `startServer`: use `secureServer.asHttpServer()`
-
-- multi_domain_secure_server: ^1.0.7
-
-## 2.0.0-beta.4
-
-- `LetsEncrypt`:
+  - `startServer`: ignore invalid domains.
   - `startServer`:
-    - `MultiDomainSecureServer`:
-      - Pass `requiresHandshakesWithHostname: true`.
-      - Ensure that `HttpServer.listenOn` receives requests from a `SecureSocket`.
-
-- multi_domain_secure_server: ^1.0.6
-
-## 2.0.0-beta.3
+    - Added parameter `v6Only`.
+    - Use `MultiDomainSecureServer` if multiple domains are being served:
+      - Utilize `MultiDomainSecureServer.asHttpServer()` to provide an `HttpServer` instance for `shelf.serveRequests`.
+      - `MultiDomainSecureServer`:
+        - Pass `requiresHandshakesWithHostname: true`.
+        - Ensure that `HttpServer.listenOn` receives requests from a `SecureSocket`.
 
 - `Domain`:
   - Added `isValidName`.
 
-- `LetsEncrypt`:
-  - `startServer`: ignore invalid domains.
-
-## 2.0.0-beta.2
-
-- `LetsEncrypt`:
-  - `startServer`:
-    - Added parameter `v6Only`.
-    - Use `MultiDomainSecureServer` if multiple domains are being served.
-
-- multi_domain_secure_server: ^1.0.5
-- dependency_validator: ^4.1.1
+- multi_domain_secure_server: ^1.0.10
+- dependency_validator: ^4.1.2
+- coverage: ^1.11.1
+- lints: ^4.0.0
+- test: ^1.25.12
 
 ## 2.0.0-beta.1
 
