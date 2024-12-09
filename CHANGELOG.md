@@ -1,3 +1,7 @@
+## 2.0.1
+
+- multi_domain_secure_server: ^1.0.12
+
 ## 2.0.0
 
 - `LetsEncrypt`:
