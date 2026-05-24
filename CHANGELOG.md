@@ -1,3 +1,27 @@
+## 2.2.0
+
+- added `LetsEncrypt.prepareDnsPersistCertificateRequest(...)` for a manual
+  two-phase `dns-persist-01` flow
+- added `PendingDnsPersistRequest`
+- made `PendingDnsPersistRequest.complete()` idempotent for repeated and
+  concurrent calls
+- added `PendingDnsPersistRequest.complete(timeout: ...)` so timed-out manual
+  completions can be retried
+- allow automated `dns-persist-01` requests without
+  `dnsPersistChallengePublisher` when `selfTest` is enabled and the persistent
+  TXT record already exists
+- added `PendingDnsPersistRequest.complete(forceRequestCertificate: true)` and
+  `shelf_letsencrypt_dns_persist --force-request-certificate` to force
+  certificate recreation
+- changed the default renewal threshold to one third of the certificate
+  lifetime, capped at 30 days
+- added the `shelf_letsencrypt_dns_persist` CLI helper
+
+## 2.1.0
+
+- migrated to `acme_client` v2
+- added support for `dns-persist-01` via `LetsEncryptChallengeType.dnsPersist`
+
 ## 2.0.3
 
 - multi_domain_secure_server: ^1.0.16

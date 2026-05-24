@@ -10,8 +10,10 @@ coverage/
 # Omit committing pubspec.lock for library packages; see
 # https://dart.dev/guides/libraries/private-files#pubspeclock.
 pubspec.lock
+pubspec_overrides.yaml
 
 .history
 .failed_tracker
-
+logs/analyzer.txt
+.mcp_logs
 .DS_Store

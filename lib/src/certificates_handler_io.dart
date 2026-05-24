@@ -291,7 +291,11 @@ class CertificatesHandlerIO extends CertificatesHandler {
     };
 
     final csr = X509Utils.generateRsaCsrPem(
-        attributes, domainKeyPair.privateKey, domainKeyPair.publicKey);
+      attributes,
+      domainKeyPair.privateKey,
+      domainKeyPair.publicKey,
+      san: [cn],
+    );
 
     return csr;
   }

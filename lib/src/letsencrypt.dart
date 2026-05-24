@@ -11,18 +11,46 @@ import 'certs_handler.dart';
 import 'check_certificate_status.dart';
 import 'domain.dart';
 import 'logging.dart';
+import 'pending_dns_persist_request.dart';
+
+/// The ACME challenge workflow used by [LetsEncrypt].
+enum LetsEncryptChallengeType {
+  /// Serve an `http-01` response from `/.well-known/acme-challenge/...`.
+  http,
+
+  /// Publish a persistent `dns-persist-01` TXT record.
+  dnsPersist,
+}
+
+/// Publishes the TXT record required for a `dns-persist-01` challenge.
+///
+/// `shelf_letsencrypt` can satisfy `http-01` itself because it controls the
+/// HTTP server. DNS publication is environment-specific, so callers must wire
+/// this callback to their DNS provider or automation.
+typedef DnsPersistChallengePublisher = FutureOr<void> Function(
+    String domainName, DnsPersistChallengeProof proof);
 
 /// Let's Encrypt certificate tool.
 class LetsEncrypt {
   final int port;
   final int securePort;
   final String bindingAddress;
+  final bool selfTest;
+  final String? acmeDirectoryUrl;
+  final LetsEncryptChallengeType challengeType;
+  final DnsPersistChallengePublisher? dnsPersistChallengePublisher;
+  final AcmeConnection? acmeConnection;
 
   LetsEncrypt(this.certificatesHandler,
       {this.port = 80,
       this.securePort = 443,
       this.bindingAddress = '0.0.0.0',
       this.production = false,
+      this.selfTest = true,
+      this.acmeDirectoryUrl,
+      this.challengeType = LetsEncryptChallengeType.http,
+      this.dnsPersistChallengePublisher,
+      this.acmeConnection,
       Logging? log})
       : logger = Logger(log);
 
@@ -51,9 +79,11 @@ class LetsEncrypt {
   final bool production;
 
   /// Returns the Let's Encrypt API base URL in use.
-  String get apiBaseURL => production
-      ? 'https://acme-v02.api.letsencrypt.org'
-      : 'https://acme-staging-v02.api.letsencrypt.org';
+  String get apiBaseURL =>
+      acmeDirectoryUrl ??
+      (production
+          ? 'https://acme-v02.api.letsencrypt.org'
+          : 'https://acme-staging-v02.api.letsencrypt.org');
 
   final Map<String, String> _challengesTokens = <String, String>{};
 
@@ -62,7 +92,7 @@ class LetsEncrypt {
 
   static final RegExp _regexpContactMethodPrefix = RegExp(r'^\w+:');
 
-  /// Performs an `ACME` challenge. Default to `HTTP-1`.
+  /// Performs an `ACME` challenge using the configured [challengeType].
   /// - [cn] is the domain to request a certificate.
   /// - [contacts] is the list of domain contacts, usually emails.
   /// - [accountPrivateKeyPem] is the account private key in PEM format.
@@ -86,160 +116,282 @@ class LetsEncrypt {
     logger.info(
         'apiBaseURL: $apiBaseURL ; cn: $cn ; contacts: $contactsWithMethod');
 
-    final client = AcmeClient(
-      apiBaseURL,
-      accountPrivateKeyPem,
-      accountPublicKeyPem,
-      true,
-      contactsWithMethod,
+    final accountCredentials = AcmeAccountCredentials(
+      privateKeyPem: accountPrivateKeyPem,
+      publicKeyPem: accountPublicKeyPem,
+      acceptTerms: true,
+      contacts: contactsWithMethod,
+    );
+    final certificateCredentials = CertificateCredentials(
+      privateKeyPem: '',
+      publicKeyPem: '',
+      csrPem: domainCSR,
+      identifiers: [DomainIdentifier(cn)],
+    );
+    try {
+      final account = await _fetchOrCreateAccount(accountCredentials, cn);
+      final identifier = DomainIdentifier(cn);
+
+      switch (challengeType) {
+        case LetsEncryptChallengeType.http:
+          return _doHttpChallenge(
+            account: account,
+            cn: cn,
+            identifier: identifier,
+            certificateCredentials: certificateCredentials,
+          );
+        case LetsEncryptChallengeType.dnsPersist:
+          return _doDnsPersistChallenge(
+            account: account,
+            cn: cn,
+            identifier: identifier,
+            certificateCredentials: certificateCredentials,
+          );
+      }
+    } catch (e, s) {
+      logger.error(e, s);
+      rethrow;
+    } finally {
+      _challengesTokens.remove(cn);
+    }
+  }
+
+  Future<Account> _fetchOrCreateAccount(
+    AcmeAccountCredentials credentials,
+    String cn,
+  ) async {
+    try {
+      return await Account.fetch(credentials, connection: _connection);
+    } catch (e, s) {
+      logger.warning('Failed to fetch ACME account, trying create', e, s);
+    }
+
+    try {
+      return await Account.create(credentials, connection: _connection);
+    } catch (e, s) {
+      logger.error('Failed to create ACME account for domain: $cn', e, s);
+      rethrow;
+    }
+  }
+
+  Future<List<String>> _doHttpChallenge({
+    required Account account,
+    required String cn,
+    required DomainIdentifier identifier,
+    required CertificateCredentials certificateCredentials,
+  }) async {
+    final order = await account.createOrderForHttp(identifiers: [identifier]);
+    final authorization = await order.getAuthorization(identifier);
+    final challenge = authorization.getChallenge();
+    final proof = challenge.buildProof();
+
+    _challengesTokens[cn] = proof.wellKnownChallengeFileContent;
+
+    logger.info(
+      'Serving http-01 challenge for $cn at ${proof.pathToWellKnownChallenge}',
     );
 
-    await _initializeClient(client, cn);
+    return _validateFinalizeAndFetch(
+      cn: cn,
+      challengeSelfTest: () => challenge.selfTest(),
+      challengeValidate: () => challenge.validate(),
+      orderIsReady: () => order.isReady(),
+      orderFinalize: () => order.finalize(certificateCredentials),
+      orderGetCertificates: () => order.getCertificates(),
+    );
+  }
 
-    final order = Order(identifiers: [Identifiers(type: 'dns', value: cn)]);
-    logger.info('Order for $cn: ${order.toJson()}');
+  Future<List<String>> _doDnsPersistChallenge({
+    required Account account,
+    required String cn,
+    required DomainIdentifier identifier,
+    required CertificateCredentials certificateCredentials,
+  }) async {
+    final publish = dnsPersistChallengePublisher;
+    final order = await account.createOrderForDnsPersist(
+      identifiers: [identifier],
+    );
+    final authorization = await order.getAuthorization(identifier);
+    final challenge = authorization.getChallenge();
+    final proof = challenge.buildProof();
 
-    final newOrder = await client.order(order);
-
-    logger.info('Fetching authorization data for order...');
-
-    final auth = await client.getAuthorization(newOrder!);
-    if (auth == null || auth.isEmpty) {
-      throw StateError("Can't get Authorization");
+    if (publish == null) {
+      logger.info(
+        'No dns-persist-01 publisher configured for $cn; '
+        'validating existing DNS record: ${proof.toBindString()}',
+      );
+    } else {
+      logger.info(
+        'Publishing dns-persist-01 challenge for $cn: ${proof.toBindString()}',
+      );
+      await publish(cn, proof);
     }
 
-    final mainAuth = auth.first;
-    final challengeData = mainAuth.getHttpDcvData();
+    return _validateFinalizeAndFetch(
+      cn: cn,
+      challengeSelfTest: () => challenge.selfTest(),
+      challengeValidate: () => challenge.validate(),
+      orderIsReady: () => order.isReady(),
+      orderFinalize: () => order.finalize(certificateCredentials),
+      orderGetCertificates: () => order.getCertificates(),
+    );
+  }
 
-    _challengesTokens[cn] = challengeData.fileContent;
+  /// Prepares a manual `dns-persist-01` flow for [domain].
+  ///
+  /// This is intended for environments where a human operator must publish the
+  /// TXT record before validation continues. The returned [PendingDnsPersistRequest]
+  /// contains the record to publish and a [PendingDnsPersistRequest.complete]
+  /// callback that should be invoked only after the record is visible in DNS.
+  Future<PendingDnsPersistRequest> prepareDnsPersistCertificateRequest(
+    Domain domain,
+  ) async {
+    final accountKeyPair = await certificatesHandler.ensureAccountPEMKeyPair();
+    await certificatesHandler.ensureDomainPEMKeyPair(domain.name);
 
-    logger.info('Self test challenge... ${challengeData.toJson()}');
-
-    final selfTestOK = await _selfChallengeTest(client, challengeData);
-    if (!selfTestOK) {
-      throw StateError('Self HTTP test not OK!');
+    final csr =
+        await certificatesHandler.generateCSR(domain.name, domain.email);
+    if (csr == null) {
+      throw StateError("Can't generate CSR for domain: $domain");
     }
 
-    final challenge =
-        mainAuth.challenges!.firstWhere((e) => e.type == VALIDATION_HTTP);
+    final accountCredentials = AcmeAccountCredentials(
+      privateKeyPem: accountKeyPair.privateKeyPEM,
+      publicKeyPem: accountKeyPair.publicKeyPEM,
+      acceptTerms: true,
+      contacts: ['mailto:${domain.email}'],
+    );
+    final certificateCredentials = CertificateCredentials(
+      privateKeyPem: '',
+      publicKeyPem: '',
+      csrPem: csr,
+      identifiers: [DomainIdentifier(domain.name)],
+    );
+    final account =
+        await _fetchOrCreateAccount(accountCredentials, domain.name);
+    final identifier = DomainIdentifier(domain.name);
+    final order = await account.createOrderForDnsPersist(
+      identifiers: [identifier],
+    );
+    final authorization = await order.getAuthorization(identifier);
+    final challenge = authorization.getChallenge();
+    final proof = challenge.buildProof();
 
-    logger.info('Validating challenge: ${challenge.toJson()}');
-    final valid = await client.validate(challenge);
+    logger.info(
+      'Prepared dns-persist-01 challenge for ${domain.name}: ${proof.toBindString()}',
+    );
 
+    return PendingDnsPersistRequest.internal(
+      domainName: domain.name,
+      proof: proof,
+      complete: ({bool forceRequestCertificate = false}) async {
+        if (!forceRequestCertificate &&
+            certificatesHandler.isHandledDomainCertificate(domain.name)) {
+          logger.info(
+            'Certificate for ${domain.name} is already stored and valid.',
+          );
+          return true;
+        }
+
+        final certs = await _validateFinalizeAndFetch(
+          cn: domain.name,
+          challengeSelfTest: () => challenge.selfTest(),
+          challengeValidate: () => challenge.validate(),
+          orderIsReady: () => order.isReady(),
+          orderFinalize: () => order.finalize(certificateCredentials),
+          orderGetCertificates: () => order.getCertificates(),
+        );
+
+        return certificatesHandler.saveSignedCertificateChain(
+          domain.name,
+          certs,
+        );
+      },
+    );
+  }
+
+  Future<List<String>> _validateFinalizeAndFetch({
+    required String cn,
+    required Future<bool> Function() challengeSelfTest,
+    required Future<bool> Function() challengeValidate,
+    required Future<bool> Function() orderIsReady,
+    required Future<void> Function() orderFinalize,
+    required Future<List<String>> Function() orderGetCertificates,
+  }) async {
+    if (selfTest) {
+      final selfTestOK = await challengeSelfTest();
+      if (!selfTestOK) {
+        throw StateError('Challenge self-test not OK for $cn');
+      }
+    }
+
+    final valid = await challengeValidate();
     if (!valid) {
-      // if you trace through client.validate it returns a response
-      // object and you can find the actual problem in
-      // response!.data['challenges'][0]['error']['detail']
       throw StateError('Challenge not valid - check your firewall and DNS!');
     }
 
     logger.info('Authorization successful!');
 
-    await Future.delayed(const Duration(seconds: 1), () {});
-
-    final ready = await client.isReady(newOrder);
+    final ready = await _waitUntilOrderReady(orderIsReady);
     if (!ready) {
       throw StateError('Order not ready!');
     }
 
     logger.info('Finalizing order...');
-    final persistent = await client.finalizeOrder(newOrder, domainCSR);
-
-    if (persistent == null) {
-      throw StateError('Error finalizing order!');
-    }
+    await orderFinalize();
 
     logger.info('Getting certificates...');
-    final certs = await client.getCertificate(persistent);
-
-    _challengesTokens.remove(cn);
-
-    if (certs == null || certs.isEmpty) {
+    final certs = await orderGetCertificates();
+    if (certs.isEmpty) {
       throw StateError('Error getting certificates!');
     }
 
     logger.info('Certificates:\n>> ${certs.join('\n>> ')}');
-
     return certs;
   }
 
-  Future<bool> _initializeClient(AcmeClient client, String cn) async {
-    try {
-      await client.init();
-      return true;
-    } catch (e, s) {
-      logger.error(e, s);
-      await _initializeClientFallback(client, cn);
-      return true;
-    }
-  }
-
-  Future<void> _initializeClientFallback(AcmeClient client, String cn) async {
-    logger.info('Trying initialization fallback...');
-
-    Account? account;
-    try {
-      account = await client.getAccount(createIfnotExists: false);
-    } catch (e, s) {
-      logger.error(e, s);
-    }
-
-    try {
-      if (account == null) {
-        logger.info('Creating account...');
-        account = await client.createAccount();
+  Future<bool> _waitUntilOrderReady(
+    Future<bool> Function() orderIsReady, {
+    int maxAttempts = 5,
+  }) async {
+    for (var attempt = 0; attempt < maxAttempts; attempt++) {
+      if (await orderIsReady()) {
+        return true;
       }
-    } catch (e, s) {
-      logger.error(e, s);
-    }
-
-    if (account == null) {
-      throw StateError("Can't initialize account for domain: $cn");
-    }
-  }
-
-  Future<bool> _selfChallengeTest(
-      AcmeClient client, HttpDcvData challengeData) async {
-    var url = challengeData.fileName;
-    if (!url.startsWith('http:') && !url.startsWith('https:')) {
-      final idx = url.indexOf(':/');
-      if (idx >= 0) {
-        final schema = url.substring(0, idx);
-        var rest = url.substring(idx);
-        rest = rest.replaceFirst(RegExp('^/+'), '');
-        url = '$schema://${rest.replaceAll('//', '/')}';
-      } else {
-        var rest = url.replaceFirst(RegExp('^/+'), '');
-        rest = rest.replaceFirst(RegExp('/'), ':$port/');
-        rest = rest.replaceAll('//', '/');
-        url = 'http://$rest';
+      if (attempt + 1 < maxAttempts) {
+        await Future.delayed(const Duration(seconds: 1), () {});
       }
     }
+    return false;
+  }
 
-    logger.info('Self test URL: $url');
+  AcmeConnection get _connection =>
+      acmeConnection ??
+      AcmeConnection(
+        baseUrl: acmeDirectoryUrl ??
+            (production
+                ? AcmeConnection.letsEncryptDirectoryUrl
+                : AcmeConnection.letsEncryptStagingDirectoryUrl),
+        logger: _logAcme,
+      );
 
-    String? content;
-    try {
-      content = await getURL(Uri.parse(url));
-    } catch (e, s) {
-      logger.error('Self test request error for URL: $url', e, s);
-      return false;
+  void _logAcme(
+    AcmeLogLevel level,
+    String message, {
+    Object? error,
+    StackTrace? stackTrace,
+  }) {
+    switch (level) {
+      case AcmeLogLevel.debug:
+        logger.info(message, stackTrace);
+        break;
+      case AcmeLogLevel.warning:
+        logger.warning(message, error, stackTrace);
+        break;
+      case AcmeLogLevel.error:
+        logger.error(message, error, stackTrace);
+        break;
     }
-
-    if (content == null || content.isEmpty) {
-      logger.info('Self test: EMPTY');
-      return false;
-    }
-
-    final match = content.trim() == challengeData.fileContent;
-
-    if (match) {
-      logger.info('Self test: OK');
-    } else {
-      logger.warning('Self test: ERROR <$content>');
-    }
-
-    return match;
   }
 
   /// A helper method to process a self check [Request].
@@ -525,6 +677,17 @@ class LetsEncrypt {
   ///
   /// Calls [doACMEChallenge].
   Future<bool> requestCertificate(Domain domain) async {
+    if (challengeType == LetsEncryptChallengeType.dnsPersist &&
+        dnsPersistChallengePublisher == null &&
+        !selfTest) {
+      throw StateError(
+        'LetsEncrypt configured for dns-persist-01 with no publisher and '
+        'selfTest disabled. Provide dnsPersistChallengePublisher, enable '
+        'selfTest so the existing TXT record can be verified, or use '
+        'prepareDnsPersistCertificateRequest(domain) for a manual flow.',
+      );
+    }
+
     final accountKeyPair = await certificatesHandler.ensureAccountPEMKeyPair();
 
     await certificatesHandler.ensureDomainPEMKeyPair(domain.name);
@@ -544,10 +707,14 @@ class LetsEncrypt {
     return ok;
   }
 
-  /// The minimal accepted HTTPS certificate validity time
-  /// when checking the current certificate validity. Default: 5 days
+  /// The maximum renewal buffer when checking the current certificate validity.
+  ///
+  /// The effective buffer is the smaller of this value and one third of the
+  /// certificate lifetime. With the default 30 day cap, a 90 day certificate is
+  /// renewed with 30 days remaining and a 45 day certificate is renewed with 15
+  /// days remaining.
   /// - See [isDomainHttpsOK].
-  Duration minCertificateValidityTime = const Duration(days: 5);
+  Duration minCertificateValidityTime = const Duration(days: 30);
 
   /// Returns true if [domain] HTTPS is OK.
   Future<bool> isDomainHttpsOK(Domain domain,
@@ -618,11 +785,16 @@ class LetsEncrypt {
         return null;
       }
 
-      if (minCertificateValidityTime != null &&
-          timeLeftInValidity < minCertificateValidityTime) {
-        logger.warning(
-            'URL `${url.scheme}://${url.host}` certificate short validity period> timeLeftInValidity: ${timeLeftInValidity.inHours} h ; minCertificateValidityTime: ${minCertificateValidityTime.inHours} h ; endValidity: $endValidity ; now: $now');
-        return null;
+      if (minCertificateValidityTime != null) {
+        final effectiveMinValidityTime = _effectiveMinCertificateValidityTime(
+          certificate,
+          minCertificateValidityTime,
+        );
+        if (timeLeftInValidity < effectiveMinValidityTime) {
+          logger.warning(
+              'URL `${url.scheme}://${url.host}` certificate short validity period> timeLeftInValidity: ${timeLeftInValidity.inHours} h ; minCertificateValidityTime: ${effectiveMinValidityTime.inHours} h ; endValidity: $endValidity ; now: $now');
+          return null;
+        }
       }
     }
 
@@ -630,6 +802,28 @@ class LetsEncrypt {
     final body = data.join();
 
     return body;
+  }
+
+  Duration _effectiveMinCertificateValidityTime(
+    X509Certificate certificate,
+    Duration maxRenewalBuffer,
+  ) {
+    final lifetime = certificate.endValidity.difference(
+      certificate.startValidity,
+    );
+    if (lifetime <= Duration.zero) {
+      return maxRenewalBuffer;
+    }
+
+    final oneThirdLifetime = Duration(
+      microseconds: lifetime.inMicroseconds ~/ 3,
+    );
+    if (oneThirdLifetime <= Duration.zero ||
+        oneThirdLifetime > maxRenewalBuffer) {
+      return maxRenewalBuffer;
+    }
+
+    return oneThirdLifetime;
   }
 
   /// Handles a bad certificate triggered by [HttpClient].

@@ -32,6 +32,13 @@ void main(List<String> args) async {
     production: false, // If `true` uses Let's Encrypt production API.
     port: 80,
     securePort: 443,
+    // For dns-persist-01 use:
+    // challengeType: LetsEncryptChallengeType.dnsPersist,
+    // dnsPersistChallengePublisher: (domainName, proof) async {
+    //   print('Publish ${proof.txtRecordName} = ${proof.txtRecordValue}');
+    // },
+    // For a manual dns-persist-01 flow, call:
+    // await letsEncrypt.prepareDnsPersistCertificateRequest(domain);
   );
 
   var servers = await _startServer(letsEncrypt, domains);

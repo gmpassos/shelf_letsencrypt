@@ -1,7 +1,11 @@
 // ignore_for_file: avoid_catches_without_on_clauses
+// ignore_for_file: invalid_use_of_internal_member
 
+import 'dart:async';
 import 'dart:io';
 
+import 'package:acme_client/acme_client.dart'
+    show DnsPersistChallenge, DnsPersistChallengeProof, DomainIdentifier;
 import 'package:basic_utils/basic_utils.dart' hide Domain;
 import 'package:path/path.dart' as pack_path;
 import 'package:shelf/shelf.dart';
@@ -70,6 +74,7 @@ void main() {
       final letsEncrypt = LetsEncrypt(certificatesHandler);
 
       expect(letsEncrypt.production, isFalse);
+      expect(letsEncrypt.challengeType, LetsEncryptChallengeType.http);
 
       expect(letsEncrypt.apiBaseURL,
           allOf(contains('letsencrypt.org'), contains('staging')));
@@ -80,6 +85,156 @@ void main() {
       );
 
       expect(checkCertificateStatus, equals(CheckCertificateStatus.invalid));
+    });
+
+    test('dns-persist configuration', () async {
+      final certificatesHandler = CertificatesHandlerIO(
+          Directory(pack_path.join(tmpDir.path, 'certs-dns-persist')));
+
+      final publishedProofs = <String>[];
+      final letsEncrypt = LetsEncrypt(
+        certificatesHandler,
+        challengeType: LetsEncryptChallengeType.dnsPersist,
+        dnsPersistChallengePublisher: (domainName, proof) {
+          publishedProofs.add('$domainName ${proof.txtRecordName}');
+        },
+      );
+
+      expect(
+        letsEncrypt.challengeType,
+        LetsEncryptChallengeType.dnsPersist,
+      );
+      expect(letsEncrypt.dnsPersistChallengePublisher, isNotNull);
+      expect(publishedProofs, isEmpty);
+    });
+
+    test('dns-persist without publisher requires self-test', () async {
+      final certificatesHandler = CertificatesHandlerIO(
+          Directory(pack_path.join(tmpDir.path, 'certs-dns-persist-manual')));
+
+      final letsEncrypt = LetsEncrypt(
+        certificatesHandler,
+        challengeType: LetsEncryptChallengeType.dnsPersist,
+        selfTest: false,
+      );
+
+      await expectLater(
+        () => letsEncrypt.requestCertificate(
+          const Domain(name: 'example.com', email: 'contact@example.com'),
+        ),
+        throwsA(
+          isA<StateError>().having(
+            (error) => error.message,
+            'message',
+            allOf(
+              contains('selfTest disabled'),
+              contains('prepareDnsPersistCertificateRequest'),
+              contains('dnsPersistChallengePublisher'),
+            ),
+          ),
+        ),
+      );
+    });
+
+    test('pending dns-persist complete shares successful completion', () async {
+      final gate = Completer<bool>();
+      var calls = 0;
+      final pending = PendingDnsPersistRequest.internal(
+        domainName: 'example.com',
+        proof: _dnsPersistProof(),
+        complete: ({bool forceRequestCertificate = false}) {
+          calls++;
+          return gate.future;
+        },
+      );
+
+      final first = pending.complete();
+      final second = pending.complete();
+      expect(identical(first, second), isTrue);
+      expect(calls, equals(1));
+
+      gate.complete(true);
+      expect(await first, isTrue);
+      expect(await second, isTrue);
+
+      final third = pending.complete();
+      expect(identical(first, third), isTrue);
+      expect(await third, isTrue);
+      expect(calls, equals(1));
+    });
+
+    test('pending dns-persist complete retries after failure', () async {
+      var calls = 0;
+      final pending = PendingDnsPersistRequest.internal(
+        domainName: 'example.com',
+        proof: _dnsPersistProof(),
+        complete: ({bool forceRequestCertificate = false}) {
+          calls++;
+          if (calls == 1) {
+            return Future<bool>.error(StateError('first attempt failed'));
+          }
+          return Future.value(true);
+        },
+      );
+
+      try {
+        await pending.complete();
+        fail('Expected first completion attempt to fail');
+      } catch (error) {
+        expect(error, isA<StateError>());
+      }
+      expect(await pending.complete(), isTrue);
+      expect(calls, equals(2));
+    });
+
+    test('pending dns-persist complete retries after timeout', () async {
+      var calls = 0;
+      final pending = PendingDnsPersistRequest.internal(
+        domainName: 'example.com',
+        proof: _dnsPersistProof(),
+        complete: ({bool forceRequestCertificate = false}) {
+          calls++;
+          if (calls == 1) {
+            return Future<bool>.delayed(
+              const Duration(seconds: 1),
+              () => true,
+            );
+          }
+          return Future.value(true);
+        },
+      );
+
+      try {
+        await pending.complete(timeout: const Duration(milliseconds: 1));
+        fail('Expected first completion attempt to time out');
+      } on TimeoutException {
+        // Expected. A timed out completion must not poison later retries.
+      }
+
+      expect(await pending.complete(), isTrue);
+      expect(calls, equals(2));
+    });
+
+    test('pending dns-persist complete can be forced', () async {
+      var calls = 0;
+      final pending = PendingDnsPersistRequest.internal(
+        domainName: 'example.com',
+        proof: _dnsPersistProof(),
+        complete: ({bool forceRequestCertificate = false}) {
+          calls++;
+          return Future.value(forceRequestCertificate);
+        },
+      );
+
+      expect(await pending.complete(), isFalse);
+      expect(await pending.complete(), isFalse);
+      expect(calls, equals(1));
+
+      expect(
+        await pending.complete(forceRequestCertificate: true),
+        isTrue,
+      );
+      expect(calls, equals(2));
     });
 
     test('ACME path + processACMEChallengeRequest', () async {
@@ -206,3 +361,13 @@ void main() {
     });
   });
 }
+
+DnsPersistChallengeProof _dnsPersistProof() =>
+    DnsPersistChallengeProof.forAuthorization(
+      domainIdentifier: const DomainIdentifier('example.com'),
+      challenge: DnsPersistChallenge(
+        issuerDomainNames: const ['issuer.example.com'],
+      ),
+      issuerDomainName: 'issuer.example.com',
+      accountUri: 'https://acme.example/acct/1',
+    );
