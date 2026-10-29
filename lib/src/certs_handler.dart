@@ -41,9 +41,12 @@ abstract class CertificatesHandler {
   /// Builds a [Map] of [SecurityContext] objects for the given [domains],
   /// which can be used in a secure [HttpServer] and with [LetsEncrypt].
   ///
-  /// If `allowUnresolvedDomain` is set to `true` and any domain cannot be resolved,
-  /// it will return `null`. Otherwise, it will return the [SecurityContext]
-  /// for the resolved domains.
+  /// If any domain has no usable certificate, it returns `null`, unless
+  /// `allowUnresolvedDomain` is `true`: then it returns the [SecurityContext]s
+  /// of the resolved domains only.
+  ///
+  /// If `loadAllHandledDomains` is `true`, it also includes every other domain
+  /// with a stored certificate.
   ///
   /// See [LetsEncrypt.startServer].
   FutureOr<Map<String, SecurityContext>?> buildSecurityContexts(

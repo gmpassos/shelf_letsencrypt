@@ -39,7 +39,7 @@ void main(List<String> args) async {
 
   var servers = await _startServer(letsEncrypt, domains);
 
-  await _startRenewalService(letsEncrypt, domains, servers.http, servers.https);
+  _startRenewalService(letsEncrypt, domains, servers);
 }
 
 Future<({HttpServer http, HttpServer https})> _startServer(
@@ -69,18 +69,19 @@ Future<({HttpServer http, HttpServer https})> _startServer(
 }
 
 /// Check every hour if any of the certificates need to be renewed.
-Future<void> _startRenewalService(LetsEncrypt letsEncrypt, List<Domain> domains,
-    HttpServer server, HttpServer secureServer) async {
+void _startRenewalService(LetsEncrypt letsEncrypt, List<Domain> domains,
+    ({HttpServer http, HttpServer https}) servers) {
   Cron().schedule(
       Schedule(hours: '*/1'), // every hour
-      () => refreshIfRequired(letsEncrypt, domains, server, secureServer));
+      () async =>
+          servers = await refreshIfRequired(letsEncrypt, domains, servers));
 }
 
-Future<void> refreshIfRequired(
+/// Returns the servers to use from now on: new ones if they were restarted.
+Future<({HttpServer http, HttpServer https})> refreshIfRequired(
   LetsEncrypt letsEncrypt,
   List<Domain> domains,
-  HttpServer server,
-  HttpServer secureServer,
+  ({HttpServer http, HttpServer https}) servers,
 ) async {
   print('-- Checking if any certificates need to be renewed');
 
@@ -98,12 +99,13 @@ Future<void> refreshIfRequired(
     }
   }
 
-  if (restartRequired) {
-    // Restart the servers:
-    await Future.wait<void>([server.close(), secureServer.close()]);
-    await _startServer(letsEncrypt, domains);
-    print('** Services restarted');
-  }
+  if (!restartRequired) return servers;
+
+  // Restart the servers:
+  await Future.wait<void>([servers.http.close(), servers.https.close()]);
+  final restarted = await _startServer(letsEncrypt, domains);
+  print('** Services restarted');
+  return restarted;
 }
 
 Response _processRequest(Request request) =>

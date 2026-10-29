@@ -40,6 +40,23 @@
 - `LetsEncrypt.requestCertificate`: throws `ArgumentError` for an invalid
   domain name before creating any account or domain keys.
 
+- `LetsEncrypt`:
+  - `startServer`: no longer modifies the given `domains` list (it threw
+    `UnsupportedError` for an unmodifiable list with an invalid domain).
+  - `startServer`: closes the servers it started when it fails, instead of
+    leaving the HTTP port bound.
+  - `getURL`: closes its `HttpClient` and uses a 30s connection timeout.
+  - `doACMEChallenge`: throws `StateError` when the order can't be created,
+    and always removes the challenge token when it finishes.
+  - `processACMEChallengeRequest`: matches the host case-insensitively and
+    supports IPv6 `Host` headers.
+
+- `CertificatesHandler.buildSecurityContexts`: fixed the documentation of
+  `allowUnresolvedDomain`, which described the opposite behaviour.
+
+- Example: the renewal service restarts the current servers. It used to close
+  the first servers again, failing on the next renewal.
+
 ## 2.0.3
 
 - multi_domain_secure_server: ^1.0.16
