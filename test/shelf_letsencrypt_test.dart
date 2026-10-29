@@ -13,6 +13,7 @@ void main() {
     late Directory tmpDir;
     setUp(() {
       tmpDir = Directory.systemTemp.createTempSync('dart-test-1-tmp-');
+      _chmod(tmpDir.path, '700');
       print('TMP DIR: $tmpDir');
     });
 
@@ -50,6 +51,161 @@ void main() {
 
       expect(csrSign, isNotEmpty);
     });
+
+    test('private keys and certificate directories are private', () async {
+      final handler = CertificatesHandlerIO(
+          Directory(pack_path.join(tmpDir.path, 'private-certs')));
+      await handler.generateAccountPEMKeyPair();
+      await handler.generateDomainPEMKeyPair('example.com');
+
+      expect(handler.directory.statSync().mode & 0x3f, 0);
+      expect(handler.fileAccountPrivateKeyPEM().statSync().mode & 0x3f, 0);
+      expect(
+          handler.fileDomainPrivateKeyPEM('example.com').statSync().mode & 0x3f,
+          0);
+      expect(
+          handler
+                  .fileDomainPrivateKeyPEM('example.com')
+                  .parent
+                  .statSync()
+                  .mode &
+              0x3f,
+          0);
+    }, skip: _posixSkip);
+
+    test('existing permissive keys are secured without changing identity',
+        () async {
+      final root = Directory(pack_path.join(tmpDir.path, 'existing-certs'));
+      final first = CertificatesHandlerIO(root);
+      final account = await first.generateAccountPEMKeyPair();
+      final domain = await first.generateDomainPEMKeyPair('example.com');
+      final accountPem = account!.privateKeyPEM;
+      final domainPem = domain!.privateKeyPEM;
+
+      _chmod(first.fileAccountPrivateKeyPEM().path, '644');
+      _chmod(first.fileDomainPrivateKeyPEM('example.com').path, '644');
+      _chmod(first.fileAccountPrivateKeyPEM().parent.path, '755');
+      _chmod(first.fileDomainPrivateKeyPEM('example.com').parent.path, '755');
+      _chmod(root.path, '755');
+
+      final migrated = CertificatesHandlerIO(root);
+      expect(
+          (await migrated.getAccountPEMKeyPair())!.privateKeyPEM, accountPem);
+      expect((await migrated.getDomainPEMKeyPair('example.com'))!.privateKeyPEM,
+          domainPem);
+      expect(root.statSync().mode & 0x3f, 0);
+      expect(migrated.fileAccountPrivateKeyPEM().statSync().mode & 0x3f, 0);
+      expect(
+          migrated.fileDomainPrivateKeyPEM('example.com').statSync().mode &
+              0x3f,
+          0);
+    }, skip: _posixSkip);
+
+    test('private-key links and incomplete pairs fail closed', () async {
+      final handler = CertificatesHandlerIO(
+          Directory(pack_path.join(tmpDir.path, 'linked-certs')));
+      final pair = await handler.generateDomainPEMKeyPair('example.com');
+      expect(pair, isNotNull);
+
+      final publicKey = handler.fileDomainPublicKeyPEM('example.com');
+      publicKey.deleteSync();
+      await expectLater(
+          handler.generateDomainPEMKeyPair('example.com'), throwsStateError);
+      expect(
+          handler.fileDomainPrivateKeyPEM('example.com').existsSync(), isTrue);
+
+      final outside = File(pack_path.join(tmpDir.path, 'outside-private.pem'))
+        ..writeAsStringSync('sentinel');
+      final privateKey = handler.fileDomainPrivateKeyPEM('example.com');
+      privateKey.deleteSync();
+      Link(privateKey.path).createSync(outside.path);
+      expect(() => handler.loadDomainPrivateKeyPEM('example.com'),
+          throwsA(isA<FileSystemException>()));
+      expect(outside.readAsStringSync(), 'sentinel');
+    }, skip: _posixSkip);
+
+    test('nested configured key and public paths still work', () async {
+      final handler = CertificatesHandlerIO(
+          Directory(pack_path.join(tmpDir.path, 'nested-certs')),
+          privateKeyPEMFileName: 'private/privkey.pem',
+          publicKeyPEMFileName: 'public/pubkey.pem');
+      final pair = await handler.generateAccountPEMKeyPair();
+      expect(pair, isNotNull);
+      expect(handler.fileAccountPrivateKeyPEM().existsSync(), isTrue);
+      expect(handler.fileAccountPublicKeyPEM().existsSync(), isTrue);
+      expect(
+          handler.fileAccountPrivateKeyPEM().parent.statSync().mode & 0x3f, 0);
+    }, skip: _posixSkip);
+
+    test('invalid public destination fails before private-key creation',
+        () async {
+      final handler = CertificatesHandlerIO(
+          Directory(pack_path.join(tmpDir.path, 'invalid-public-certs')));
+      final publicKey = handler.fileAccountPublicKeyPEM();
+      publicKey.parent.createSync(recursive: true);
+      Directory(publicKey.path).createSync();
+
+      await expectLater(handler.generateAccountPEMKeyPair(),
+          throwsA(isA<FileSystemException>()));
+      expect(handler.fileAccountPrivateKeyPEM().existsSync(), isFalse);
+    });
+
+    test('storage checks and writes cannot resolve different roots', () {
+      final safe = Directory(pack_path.join(tmpDir.path, 'safe'))..createSync();
+      final elsewhere = Directory(pack_path.join(tmpDir.path, 'elsewhere'))
+        ..createSync();
+      final child = Directory(pack_path.join(elsewhere.path, 'child'))
+        ..createSync();
+      final actual = Directory(pack_path.join(elsewhere.path, 'store'))
+        ..createSync();
+      _chmod(actual.path, '755');
+      Link(pack_path.join(safe.path, 'link')).createSync(child.path);
+
+      expect(
+          () => CertificatesHandlerIO(
+              Directory(pack_path.join(safe.path, 'link', '..', 'store'))),
+          throwsArgumentError);
+      expect(actual.statSync().mode & 0x3f, isNot(0));
+      expect(
+          Directory(pack_path.join(safe.path, 'store')).existsSync(), isFalse);
+      expect(
+          () => CertificatesHandlerIO(
+              Directory(pack_path.join(tmpDir.path, 'configured-paths')),
+              privateKeyPEMFileName: 'link/../privkey.pem'),
+          throwsArgumentError);
+    }, skip: _posixSkip);
+
+    test('symbolic links in the storage path are resolved', () {
+      final real = Directory(pack_path.join(tmpDir.path, 'real'))..createSync();
+      _chmod(real.path, '755');
+      final alias = Link(pack_path.join(tmpDir.path, 'alias'))
+        ..createSync(real.path);
+
+      final handler =
+          CertificatesHandlerIO(Directory(pack_path.join(alias.path, 'certs')));
+
+      expect(
+          handler.directory.path,
+          equals(Directory(pack_path.join(real.path, 'certs'))
+              .resolveSymbolicLinksSync()));
+      expect(handler.fileAccountPrivateKeyPEM().path,
+          startsWith(handler.directory.path));
+    }, skip: _posixSkip);
+
+    test('storage under a directory writable by others is rejected', () {
+      final shared = Directory(pack_path.join(tmpDir.path, 'shared'))
+        ..createSync();
+      final certs = Directory(pack_path.join(shared.path, 'certs'));
+
+      _chmod(shared.path, '777');
+      expect(() => CertificatesHandlerIO(certs),
+          throwsA(isA<FileSystemException>()));
+      expect(certs.existsSync(), isFalse);
+
+      // A sticky shared parent, like /tmp, is accepted:
+      _chmod(shared.path, '1777');
+      expect(CertificatesHandlerIO(certs).directory.existsSync(), isTrue);
+    }, skip: _posixSkip);
 
     test('domain names cannot escape certificate storage', () async {
       final handler = CertificatesHandlerIO(
@@ -136,6 +292,7 @@ void main() {
     late Directory tmpDir;
     setUp(() {
       tmpDir = Directory.systemTemp.createTempSync('dart-test-1-tmp-');
+      _chmod(tmpDir.path, '700');
       print('TMP DIR: $tmpDir');
     });
 
@@ -351,6 +508,17 @@ Future<void> _storeSelfSignedCertificate(
   final certificate =
       X509Utils.generateSelfSignedCertificate(keyPair.privateKey, csr, 30);
   await handler.saveSignedCertificateChain(cn, [certificate]);
+}
+
+/// Owner-only POSIX permissions are not enforced on Windows.
+final _posixSkip = Platform.isWindows ? 'POSIX permissions' : null;
+
+void _chmod(String path, String mode) {
+  if (Platform.isWindows) return;
+  final result = Process.runSync('chmod', [mode, path]);
+  if (result.exitCode != 0) {
+    throw FileSystemException('chmod $mode failed: ${result.stderr}', path);
+  }
 }
 
 void _copyDirectory(Directory from, String toPath) {

@@ -44,6 +44,7 @@ class Domain {
   const Domain({required this.name, required this.email});
 
   /// ASCII DNS labels are safe as individual certificate directory names.
+  /// A label cannot contain a path separator, a drive prefix, or `..`.
   /// The top-level label must contain a letter, which rejects IP addresses
   /// such as `1.2.3.4`.
   static final regexpDomainName = RegExp(

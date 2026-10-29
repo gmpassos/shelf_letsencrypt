@@ -21,6 +21,40 @@
 LetsEncrypt provide a few challenges for your development enviroment. 
 Read on for a few hints.
 
+## Certificate storage security
+
+On Linux, Android, macOS and iOS, `CertificatesHandlerIO` uses an owner-only
+storage backend. It creates managed directories with mode `0700` and private
+keys with mode `0600` before writing key material. On reuse, it tightens
+existing key permissions without changing the key bytes. Existing keys that
+may already have been read by another user should be rotated by the operator.
+On Linux this requires `statx` (glibc 2.28+, musl 1.2.5+ or Android API 30+).
+
+On Windows, POSIX modes do not apply: keys inherit the ACLs of the storage
+directory, so place it in a directory that only the service account can read.
+POSIX mode checks also do not exclude readers granted access through macOS
+ACLs.
+
+Use a service-owned certificate directory under trusted ancestors. Ancestors
+must not be writable by group or others, unless sticky: a shared sticky parent
+such as `/tmp` is suitable only when its owner is trusted. Symbolic links in
+the storage path must be owned by root or the service user. The handler
+resolves them, and checks and operates on the real path, which is what
+`directory` returns. External private-key paths configured through the
+constructor must already have an owner-only parent. The storage root and
+configured PEM paths cannot contain `..` path components. Network filesystems
+and another process running as the service user are outside this backend's
+protection. If an existing store has a different owner, a symlinked key, or an
+external hard link, construction or key loading fails so the operator can
+migrate it deliberately.
+
+Certificate domain names must be ASCII DNS names with at least two labels.
+Each label must be 1–63 letters, digits, or hyphens and start and end with a
+letter or digit, and the last label must contain a letter. This accepts
+multi-label and punycode names; it rejects IP addresses, path separators,
+traversal components, wildcards, and trailing dots before a domain can select a
+certificate path.
+
 ## A word of caution
 LetsEncrypt rate limits the issuing of production certificates.
 It is very easy to get locked out of letsencrypt for an extended period of time (days)
@@ -110,9 +144,12 @@ void main(List<String> args) async {
   final domainNamesArg = args[0]; // Domains for the HTTPS certificate.
   final domainEmailsArg = args[1]; // The domains e-mail.
 
+  final home = Platform.environment['HOME'];
   var certificatesDirectory = args.length > 2
       ? args[2] // Optional argument.
-      : '/tmp/shelf-letsencrypt-example/'; // Default directory.
+      : home == null
+          ? (throw StateError('Pass a certificate directory as argument 3'))
+          : '$home/.shelf-letsencrypt-example';
 
   final domains =
   Domain.fromDomainsNamesAndEmailsArgs(domainNamesArg, domainEmailsArg);

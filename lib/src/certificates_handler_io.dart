@@ -8,20 +8,44 @@ import 'certs_handler.dart';
 import 'domain.dart';
 import 'domain_certificate_file_path.dart';
 import 'pem_key_pair.dart';
+import 'private_key_storage.dart';
 import 'security_context_builder.dart';
 
 /// A [CertificatesHandler] implementation using [dart:io].
 class CertificatesHandlerIO extends CertificatesHandler {
-  CertificatesHandlerIO(this.directory,
+  CertificatesHandlerIO(Directory directory,
       {super.accountDirectory,
       super.privateKeyPEMFileName,
       super.publicKeyPEMFileName,
       super.fullChainPEMFileName}) {
-    directory.createSync(recursive: true);
+    for (final configuredPath in [
+      accountDirectory,
+      privateKeyPEMFileName,
+      publicKeyPEMFileName,
+      fullChainPEMFileName
+    ]) {
+      if (pack_path.split(configuredPath).any((part) => part == '..')) {
+        throw ArgumentError.value(configuredPath, 'configuredPath',
+            'Certificate paths cannot contain parent components');
+      }
+    }
+    _storage = PrivateKeyStorage(_checkedStorageDirectory(directory));
   }
 
-  /// The [Directory] to storage certificates.
-  final Directory directory;
+  static Directory _checkedStorageDirectory(Directory directory) {
+    final absolutePath = directory.absolute.path;
+    if (pack_path.split(directory.path).contains('..') ||
+        pack_path.split(absolutePath).contains('..')) {
+      throw ArgumentError.value(directory.path, 'directory',
+          'Certificate storage path cannot contain parent components');
+    }
+    return Directory(pack_path.normalize(absolutePath));
+  }
+
+  /// The [Directory] to storage certificates, as an absolute path with
+  /// symbolic links resolved (except on Windows).
+  Directory get directory => _storage.root;
+  late final PrivateKeyStorage _storage;
 
   @override
   List<String> listAllHandledDomains({bool checkSecurityContext = true}) {
@@ -100,6 +124,7 @@ class CertificatesHandlerIO extends CertificatesHandler {
       SecurityContextBuilder securityContextBuilder, String domain) async {
     final fullChainFile = fileDomainFullChainPEM(domain);
     final privateKeyFile = fileDomainPrivateKeyPEM(domain);
+    _storage.secureExistingKey(privateKeyFile);
 
     if (!_fileExistsWithContent(fullChainFile) ||
         !_fileExistsWithContent(privateKeyFile)) {
@@ -120,6 +145,7 @@ class CertificatesHandlerIO extends CertificatesHandler {
       {bool checkSecurityContext = true}) {
     final fullChainFile = fileDomainFullChainPEM(domain);
     final privateKeyFile = fileDomainPrivateKeyPEM(domain);
+    _storage.secureExistingKey(privateKeyFile);
 
     if (!_fileExistsWithContent(fullChainFile) ||
         !_fileExistsWithContent(privateKeyFile)) {
@@ -176,6 +202,7 @@ class CertificatesHandlerIO extends CertificatesHandler {
   @override
   FutureOr<String?> loadAccountPrivateKeyPEM() {
     final file = fileAccountPrivateKeyPEM();
+    _storage.secureExistingKey(file);
     return _readFileWithContent(file);
   }
 
@@ -188,6 +215,7 @@ class CertificatesHandlerIO extends CertificatesHandler {
   @override
   FutureOr<String?> loadDomainPrivateKeyPEM(String cn) {
     final file = fileDomainPrivateKeyPEM(cn);
+    _storage.secureExistingKey(file);
     return _readFileWithContent(file);
   }
 
@@ -212,7 +240,8 @@ class CertificatesHandlerIO extends CertificatesHandler {
     final filePrivateKey = fileAccountPrivateKeyPEM();
     final filePublicKey = fileAccountPublicKeyPEM();
 
-    return _generateStoredKeyPair(filePrivateKey, filePublicKey, force);
+    return _generateStoredKeyPair(
+        filePrivateKey, filePublicKey, force, getAccountPEMKeyPair);
   }
 
   @override
@@ -221,23 +250,41 @@ class CertificatesHandlerIO extends CertificatesHandler {
     final filePrivateKey = fileDomainPrivateKeyPEM(cn);
     final filePublicKey = fileDomainPublicKeyPEM(cn);
 
-    return _generateStoredKeyPair(filePrivateKey, filePublicKey, force);
+    return _generateStoredKeyPair(
+        filePrivateKey, filePublicKey, force, () => getDomainPEMKeyPair(cn));
   }
 
   Future<PEMKeyPair?> _generateStoredKeyPair(
-      File filePrivateKey, File filePublicKey, bool force) async {
-    if (!force &&
-        (_fileExistsWithContent(filePrivateKey) ||
-            _fileExistsWithContent(filePublicKey))) {
-      return getAccountPEMKeyPair();
+      File filePrivateKey,
+      File filePublicKey,
+      bool force,
+      Future<PEMKeyPair?> Function() loadExisting) async {
+    _storage.secureExistingKey(filePrivateKey);
+    final hasPrivate = _fileExistsWithContent(filePrivateKey);
+    final hasPublic = _fileExistsWithContent(filePublicKey);
+    if (!force && (hasPrivate || hasPublic)) {
+      if (!hasPrivate || !hasPublic) {
+        throw StateError('Stored key pair is incomplete');
+      }
+      final existing = await loadExisting();
+      if (existing == null ||
+          existing.privateKey.modulus != existing.publicKey.modulus) {
+        throw StateError('Stored private and public keys do not match');
+      }
+      return existing;
     }
 
     final keyPair = generatePEMKeyPair();
-
-    filePrivateKey.parent.createSync(recursive: true);
+    _storage.prepareKeyParent(filePrivateKey.parent);
     filePublicKey.parent.createSync(recursive: true);
-
-    filePrivateKey.writeAsStringSync(keyPair.privateKeyPEM);
+    final publicType =
+        FileSystemEntity.typeSync(filePublicKey.path, followLinks: false);
+    if (publicType != FileSystemEntityType.notFound &&
+        publicType != FileSystemEntityType.file) {
+      throw FileSystemException(
+          'Public key destination is not a regular file', filePublicKey.path);
+    }
+    _storage.writeKey(filePrivateKey, keyPair.privateKeyPEM);
     filePublicKey.writeAsStringSync(keyPair.publicKeyPEM);
 
     return keyPair;
@@ -293,6 +340,15 @@ class CertificatesHandlerIO extends CertificatesHandler {
     final filePrivateKey = fileDomainFullChainPEM(cn);
 
     filePrivateKey.parent.createSync(recursive: true);
+    final chainType =
+        FileSystemEntity.typeSync(filePrivateKey.path, followLinks: false);
+    if (chainType != FileSystemEntityType.notFound &&
+        chainType != FileSystemEntityType.file) {
+      throw FileSystemException(
+          'Certificate chain destination is not a '
+          'regular file',
+          filePrivateKey.path);
+    }
     filePrivateKey.writeAsStringSync(fullChainPEM);
 
     return true;

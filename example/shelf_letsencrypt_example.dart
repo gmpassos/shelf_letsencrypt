@@ -15,9 +15,12 @@ void main(List<String> args) async {
   final domainNamesArg = args[0]; // Domains for the HTTPS certificate.
   final domainEmailsArg = args[1]; // The domains e-mail.
 
+  final home = Platform.environment['HOME'];
   var certificatesDirectory = args.length > 2
       ? args[2] // Optional argument.
-      : '/tmp/shelf-letsencrypt-example/'; // Default directory.
+      : home == null
+          ? (throw StateError('Pass a certificate directory as argument 3'))
+          : '$home/.shelf-letsencrypt-example';
 
   final domains =
       Domain.fromDomainsNamesAndEmailsArgs(domainNamesArg, domainEmailsArg);
