@@ -51,6 +51,36 @@ void main() {
       expect(csrSign, isNotEmpty);
     });
 
+    test('domain names cannot escape certificate storage', () async {
+      final handler = CertificatesHandlerIO(
+          Directory(pack_path.join(tmpDir.path, 'bounded-certs')));
+      for (final invalid in ['../outside', r'..\outside', '/outside', 'a/b']) {
+        expect(() => handler.fileDomainPrivateKeyPEM(invalid),
+            throwsArgumentError);
+        expect(
+            () => handler.fileDomainPublicKeyPEM(invalid), throwsArgumentError);
+        expect(
+            () => handler.fileDomainFullChainPEM(invalid), throwsArgumentError);
+        await expectLater(
+            handler.generateDomainPEMKeyPair(invalid), throwsArgumentError);
+        await expectLater(handler.saveSignedCertificateChain(invalid, ['test']),
+            throwsArgumentError);
+      }
+      expect(Directory(pack_path.join(tmpDir.path, 'outside')).existsSync(),
+          isFalse);
+    });
+
+    test('multi-label domains remain valid storage names', () async {
+      final handler = CertificatesHandlerIO(
+          Directory(pack_path.join(tmpDir.path, 'multi-label-certs')));
+      for (final name in ['api.dev.example.com', 'www.example.co.uk']) {
+        expect(Domain(name: name, email: '').isValidName, isTrue);
+        final key = await handler.generateDomainPEMKeyPair(name);
+        expect(key, isNotNull);
+        expect(handler.fileDomainPrivateKeyPEM(name).existsSync(), isTrue);
+      }
+    });
+
     tearDown(() {
       tmpDir.deleteSync(recursive: true);
     });
@@ -80,6 +110,20 @@ void main() {
       );
 
       expect(checkCertificateStatus, equals(CheckCertificateStatus.invalid));
+    });
+
+    test('invalid request domain has no storage side effects', () async {
+      final handler = CertificatesHandlerIO(
+          Directory(pack_path.join(tmpDir.path, 'rejected-domain-certs')));
+      final letsEncrypt = LetsEncrypt(handler);
+
+      await expectLater(
+          letsEncrypt.requestCertificate(
+              const Domain(name: '../outside', email: 'contact@example.com')),
+          throwsArgumentError);
+      expect(handler.fileAccountPrivateKeyPEM().existsSync(), isFalse);
+      expect(Directory(pack_path.join(tmpDir.path, 'outside')).existsSync(),
+          isFalse);
     });
 
     test('ACME path + processACMEChallengeRequest', () async {

@@ -525,6 +525,9 @@ class LetsEncrypt {
   ///
   /// Calls [doACMEChallenge].
   Future<bool> requestCertificate(Domain domain) async {
+    if (!domain.isValidName) {
+      throw ArgumentError.value(domain.name, 'domain', 'Invalid domain name');
+    }
     final accountKeyPair = await certificatesHandler.ensureAccountPEMKeyPair();
 
     await certificatesHandler.ensureDomainPEMKeyPair(domain.name);
