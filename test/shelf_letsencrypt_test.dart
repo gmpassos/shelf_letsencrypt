@@ -8,6 +8,8 @@ import 'package:shelf/shelf.dart';
 import 'package:shelf_letsencrypt/shelf_letsencrypt.dart';
 import 'package:test/test.dart';
 
+import 'support/certificates.dart';
+
 void main() {
   group('CertificatesHandlerIO', () {
     late Directory tmpDir;
@@ -249,7 +251,7 @@ void main() {
           Directory(pack_path.join(tmpDir.path, 'discovery-certs'));
       final handler = CertificatesHandlerIO(certsDir);
 
-      await _storeSelfSignedCertificate(handler, 'example.com');
+      await storeSelfSignedCertificate(handler, 'example.com');
       expect(handler.listAllHandledDomains(), equals(['example.com']));
 
       // Complete certificates stored under names that are not valid domains:
@@ -278,7 +280,7 @@ void main() {
           publicKeyPEMFileName: pack_path.join('live', 'pubkey.pem'),
           fullChainPEMFileName: pack_path.join('live', 'fullchain.pem'));
 
-      await _storeSelfSignedCertificate(handler, 'example.com');
+      await storeSelfSignedCertificate(handler, 'example.com');
 
       expect(handler.listAllHandledDomains(), equals(['example.com']));
     });
@@ -499,15 +501,6 @@ void main() {
       }
     });
   });
-}
-
-Future<void> _storeSelfSignedCertificate(
-    CertificatesHandlerIO handler, String cn) async {
-  final keyPair = await handler.ensureDomainPEMKeyPair(cn);
-  final csr = (await handler.generateCSR(cn, 'contact@$cn'))!;
-  final certificate =
-      X509Utils.generateSelfSignedCertificate(keyPair.privateKey, csr, 30);
-  await handler.saveSignedCertificateChain(cn, [certificate]);
 }
 
 /// Owner-only POSIX permissions are not enforced on Windows.

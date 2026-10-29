@@ -40,6 +40,35 @@
 - `LetsEncrypt.requestCertificate`: throws `ArgumentError` for an invalid
   domain name before creating any account or domain keys.
 
+- `LetsEncrypt`:
+  - `startServer`: no longer modifies the given `domains` list (it threw
+    `UnsupportedError` for an unmodifiable list with an invalid domain).
+  - `startServer`: closes the servers it started when it fails, instead of
+    leaving the HTTP port bound.
+  - `getURL`: closes its `HttpClient` and uses a 30s connection timeout.
+  - `doACMEChallenge`: throws `StateError` when the order can't be created,
+    and always removes the challenge token when it finishes.
+  - The ACME account fallback now applies the account it finds or creates
+    (the order used to fail with a null-check error), uses a fresh nonce
+    instead of replaying a spent one (rejected with `badNonce`), and also runs
+    when the client initialization ends without an account.
+  - Challenge tokens are matched case-insensitively, so a domain such as
+    `WWW.Example.com` passes the HTTP-01 challenge and self-test.
+
+- `CertificatesHandler.buildSecurityContexts`: fixed the documentation of
+  `allowUnresolvedDomain`, which described the opposite behaviour.
+
+- Example: the renewal service restarts the current servers. It used to close
+  the first servers again, failing on the next renewal. A failed restart is
+  retried on the next check.
+
+- Tests:
+  - Integration tests of the full ACME flow (issuance, reuse, renewal, SNI
+    with multiple domains and every failure path) against an in-process fake
+    ACME server with real HTTP-01 validation and nonce checks.
+  - Line coverage from 61% to over 93%; CI runs on Linux and macOS and fails
+    below 90%.
+
 ## 2.0.3
 
 - multi_domain_secure_server: ^1.0.16

@@ -55,10 +55,11 @@ class LetsEncrypt {
       ? 'https://acme-v02.api.letsencrypt.org'
       : 'https://acme-staging-v02.api.letsencrypt.org';
 
+  /// Challenge tokens by lower-case domain: DNS names are case-insensitive.
   final Map<String, String> _challengesTokens = <String, String>{};
 
   /// Returns a challenge toke for [cn] (if one is being executed).
-  String? getChallengeToken(String cn) => _challengesTokens[cn];
+  String? getChallengeToken(String cn) => _challengesTokens[cn.toLowerCase()];
 
   static final RegExp _regexpContactMethodPrefix = RegExp(r'^\w+:');
 
@@ -100,10 +101,13 @@ class LetsEncrypt {
     logger.info('Order for $cn: ${order.toJson()}');
 
     final newOrder = await client.order(order);
+    if (newOrder == null) {
+      throw StateError("Can't create order for: $cn");
+    }
 
     logger.info('Fetching authorization data for order...');
 
-    final auth = await client.getAuthorization(newOrder!);
+    final auth = await client.getAuthorization(newOrder);
     if (auth == null || auth.isEmpty) {
       throw StateError("Can't get Authorization");
     }
@@ -111,8 +115,22 @@ class LetsEncrypt {
     final mainAuth = auth.first;
     final challengeData = mainAuth.getHttpDcvData();
 
-    _challengesTokens[cn] = challengeData.fileContent;
+    _challengesTokens[cn.toLowerCase()] = challengeData.fileContent;
+    try {
+      return await _completeChallenge(
+          client, cn, newOrder, mainAuth, challengeData, domainCSR);
+    } finally {
+      _challengesTokens.remove(cn.toLowerCase());
+    }
+  }
 
+  Future<List<String>> _completeChallenge(
+      AcmeClient client,
+      String cn,
+      Order newOrder,
+      Authorization mainAuth,
+      HttpDcvData challengeData,
+      String domainCSR) async {
     logger.info('Self test challenge... ${challengeData.toJson()}');
 
     final selfTestOK = await _selfChallengeTest(client, challengeData);
@@ -152,8 +170,6 @@ class LetsEncrypt {
     logger.info('Getting certificates...');
     final certs = await client.getCertificate(persistent);
 
-    _challengesTokens.remove(cn);
-
     if (certs == null || certs.isEmpty) {
       throw StateError('Error getting certificates!');
     }
@@ -163,22 +179,30 @@ class LetsEncrypt {
     return certs;
   }
 
-  Future<bool> _initializeClient(AcmeClient client, String cn) async {
+  Future<void> _initializeClient(AcmeClient client, String cn) async {
     try {
       await client.init();
-      return true;
     } catch (e, s) {
       logger.error(e, s);
+    }
+    // `init` returns without an account when the lookup or creation fails.
+    if (client.directories == null || client.account == null) {
       await _initializeClientFallback(client, cn);
-      return true;
     }
   }
 
   Future<void> _initializeClientFallback(AcmeClient client, String cn) async {
     logger.info('Trying initialization fallback...');
 
+    if (client.directories == null) {
+      throw StateError("Can't load the ACME directory for domain: $cn");
+    }
+
+    // `AcmeClient` only takes a new nonce from successful responses, so the
+    // current one may be spent: let it fetch a fresh nonce for each request.
     Account? account;
     try {
+      client.nonce = null;
       account = await client.getAccount(createIfnotExists: false);
     } catch (e, s) {
       logger.error(e, s);
@@ -187,6 +211,7 @@ class LetsEncrypt {
     try {
       if (account == null) {
         logger.info('Creating account...');
+        client.nonce = null;
         account = await client.createAccount();
       }
     } catch (e, s) {
@@ -196,6 +221,7 @@ class LetsEncrypt {
     if (account == null) {
       throw StateError("Can't initialize account for domain: $cn");
     }
+    client.account = account;
   }
 
   Future<bool> _selfChallengeTest(
@@ -323,7 +349,8 @@ class LetsEncrypt {
       logger
           .info("Ignoring invalid domains: ${Domain.toNames(invalidDomains)}");
 
-      domains.removeWhere((d) => !d.isValidName);
+      // Don't modify the caller's list, which may be unmodifiable.
+      domains = domains.where((d) => d.isValidName).toList();
     }
 
     if (domains.isEmpty) {
@@ -398,96 +425,104 @@ class LetsEncrypt {
 
     HttpServer? secureServer;
 
-    logger.info('$certificatesHandler');
-    logger.info(
-        'Handled domains: ${certificatesHandler.listAllHandledDomains()}');
-
-    var securityContexts = await certificatesHandler.buildSecurityContexts(
-        domains,
-        allowUnresolvedDomain: false,
-        loadAllHandledDomains: loadAllHandledDomains);
-
-    logger.info(
-        '''securityContext[loadAllHandledDomains: $loadAllHandledDomains]: $securityContexts''');
-
-    if (securityContexts == null || securityContexts.isEmpty) {
-      if (!requestCertificate) {
-        if (securityContexts == null) {
-          throw StateError(
-              """Can't load all `SecurityContext`s. Parameter `requestCertificate` is `false`, can't request certificates! Domains: ${Domain.toNames(domains)}""");
-        } else {
-          throw StateError(
-              """No previous `SecurityContext`s. Parameter `requestCertificate` is `false`, can't request certificates! Domains: ${Domain.toNames(domains)}""");
-        }
-      }
-
-      final domainsToCheck = certificatesHandler.listNotHandledDomains(domains);
-
+    try {
+      logger.info('$certificatesHandler');
       logger.info(
-          'Requesting certificate for: ${Domain.toNames(domainsToCheck)}');
+          'Handled domains: ${certificatesHandler.listAllHandledDomains()}');
 
-      for (final domain in domainsToCheck) {
-        final ok = await this.requestCertificate(domain);
-        if (!ok) {
-          throw StateError('Error requesting certificate!');
-        }
-      }
-
-      securityContexts = await certificatesHandler.buildSecurityContexts(
+      var securityContexts = await certificatesHandler.buildSecurityContexts(
           domains,
           allowUnresolvedDomain: false,
           loadAllHandledDomains: loadAllHandledDomains);
-      if (securityContexts == null || securityContexts.isEmpty) {
-        throw StateError(
-            '''Error loading SecureContext after successful request of certificates> domainsToCheck: ${Domain.toNames(domainsToCheck)} ; domains: ${Domain.toNames(domains)}''');
-      }
 
       logger.info(
-          'Starting secure server> port: $securePort ; domains: $domains');
-      secureServer = await startSecureServer(securityContexts,
-          backlog: backlog, shared: shared, v6Only: v6Only);
-    } else {
-      secureServer = await startSecureServer(securityContexts,
-          backlog: backlog, shared: shared, v6Only: v6Only);
+          '''securityContext[loadAllHandledDomains: $loadAllHandledDomains]: $securityContexts''');
 
-      if (checkCertificate) {
-        logger.info('Checking domains certificates: $domains');
-
-        var refreshedCertificate = false;
-
-        for (final domain in domains) {
-          logger.info('Checking certificate for: ${domain.name}');
-
-          final checkCertificateStatus = await this.checkCertificate(domain,
-              requestCertificate: requestCertificate,
-              forceRequestCertificate: forceRequestCertificate);
-
-          logger.info('CheckCertificateStatus: $checkCertificateStatus');
-
-          if (checkCertificateStatus.isOkRefreshed) {
-            refreshedCertificate = true;
-          } else if (checkCertificateStatus.isNotOK) {
+      if (securityContexts == null || securityContexts.isEmpty) {
+        if (!requestCertificate) {
+          if (securityContexts == null) {
             throw StateError(
-                '''Certificate check error! Status: $checkCertificateStatus ; domain: ${domain.name}''');
+                """Can't load all `SecurityContext`s. Parameter `requestCertificate` is `false`, can't request certificates! Domains: ${Domain.toNames(domains)}""");
+          } else {
+            throw StateError(
+                """No previous `SecurityContext`s. Parameter `requestCertificate` is `false`, can't request certificates! Domains: ${Domain.toNames(domains)}""");
           }
         }
 
-        if (refreshedCertificate) {
-          logger.warning('Refreshing SecureContext due new certificate.');
-          securityContexts = await certificatesHandler.buildSecurityContexts(
-              domains,
-              loadAllHandledDomains: loadAllHandledDomains);
-          if (securityContexts == null || securityContexts.isEmpty) {
-            throw StateError(
-                '''Error loading SecureContext after successful certificate check for: ${Domain.toNames(domains)}''');
+        final domainsToCheck =
+            certificatesHandler.listNotHandledDomains(domains);
+
+        logger.info(
+            'Requesting certificate for: ${Domain.toNames(domainsToCheck)}');
+
+        for (final domain in domainsToCheck) {
+          final ok = await this.requestCertificate(domain);
+          if (!ok) {
+            throw StateError('Error requesting certificate!');
+          }
+        }
+
+        securityContexts = await certificatesHandler.buildSecurityContexts(
+            domains,
+            allowUnresolvedDomain: false,
+            loadAllHandledDomains: loadAllHandledDomains);
+        if (securityContexts == null || securityContexts.isEmpty) {
+          throw StateError(
+              '''Error loading SecureContext after successful request of certificates> domainsToCheck: ${Domain.toNames(domainsToCheck)} ; domains: ${Domain.toNames(domains)}''');
+        }
+
+        logger.info(
+            'Starting secure server> port: $securePort ; domains: $domains');
+        secureServer = await startSecureServer(securityContexts,
+            backlog: backlog, shared: shared, v6Only: v6Only);
+      } else {
+        secureServer = await startSecureServer(securityContexts,
+            backlog: backlog, shared: shared, v6Only: v6Only);
+
+        if (checkCertificate) {
+          logger.info('Checking domains certificates: $domains');
+
+          var refreshedCertificate = false;
+
+          for (final domain in domains) {
+            logger.info('Checking certificate for: ${domain.name}');
+
+            final checkCertificateStatus = await this.checkCertificate(domain,
+                requestCertificate: requestCertificate,
+                forceRequestCertificate: forceRequestCertificate);
+
+            logger.info('CheckCertificateStatus: $checkCertificateStatus');
+
+            if (checkCertificateStatus.isOkRefreshed) {
+              refreshedCertificate = true;
+            } else if (checkCertificateStatus.isNotOK) {
+              throw StateError(
+                  '''Certificate check error! Status: $checkCertificateStatus ; domain: ${domain.name}''');
+            }
           }
 
-          logger.warning('Restarting secure server...');
-          await secureServer.close(force: true);
-          secureServer = await startSecureServer(securityContexts,
-              backlog: backlog, shared: shared, v6Only: v6Only);
+          if (refreshedCertificate) {
+            logger.warning('Refreshing SecureContext due new certificate.');
+            securityContexts = await certificatesHandler.buildSecurityContexts(
+                domains,
+                loadAllHandledDomains: loadAllHandledDomains);
+            if (securityContexts == null || securityContexts.isEmpty) {
+              throw StateError(
+                  '''Error loading SecureContext after successful certificate check for: ${Domain.toNames(domains)}''');
+            }
+
+            logger.warning('Restarting secure server...');
+            await secureServer.close(force: true);
+            secureServer = await startSecureServer(securityContexts,
+                backlog: backlog, shared: shared, v6Only: v6Only);
+          }
         }
       }
+    } catch (_) {
+      // Release the ports bound so far, so the caller can retry.
+      await secureServer?.close(force: true);
+      await server.close(force: true);
+      rethrow;
     }
 
     return (http: server, https: secureServer);
@@ -599,8 +634,20 @@ class LetsEncrypt {
       bool checkCertificate = true,
       bool log = true}) async {
     final client = HttpClient()
+      ..connectionTimeout = const Duration(seconds: 30)
       ..badCertificateCallback = badCertificateCallback;
+    try {
+      return await _getURL(client, url,
+          minCertificateValidityTime: minCertificateValidityTime,
+          checkCertificate: checkCertificate);
+    } finally {
+      client.close(force: true);
+    }
+  }
 
+  Future<String?> _getURL(HttpClient client, Uri url,
+      {Duration? minCertificateValidityTime,
+      required bool checkCertificate}) async {
     final request = await client.getUrl(url);
     final response = await request.close();
 
