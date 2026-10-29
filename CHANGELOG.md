@@ -1,9 +1,32 @@
 ## Unreleased security patch
 
-- Validate certificate domain names before domain-derived filesystem access.
 - Store and migrate owner-only private keys on Linux. The built-in IO storage
   handler now fails closed on other platforms pending dedicated ACL backends.
-- Preserve multi-label domain names and nested configured PEM paths.
+
+## 2.0.4
+
+- Security: validate certificate domain names before building filesystem paths
+  (GHSA-j4rv-3cg2-g9xc). A domain such as `../outside` could previously read or
+  write keys and certificates outside the certificates directory.
+
+- `Domain.isValidName`:
+  - Accepts any number of labels (e.g. `api.dev.example.com`), with the DNS
+    limits of 63 characters per label and 253 in total.
+  - Rejects all-numeric top-level labels, so IP addresses such as `1.2.3.4`
+    are not valid domains.
+  - `startServer` no longer silently drops domains with 4 or more labels.
+
+- `CertificatesHandlerIO`:
+  - `fileDomain*PEM`, `isHandledDomainCertificate`, `loadDomain*PEM`,
+    `generateDomainPEMKeyPair`, `saveSignedCertificateChain` and
+    `buildSecurityContexts` throw `ArgumentError` for an invalid domain name
+    (previously `buildSecurityContexts` treated it as unresolved).
+  - `listAllHandledDomains` ignores directories whose name is not a valid
+    domain, and symlinked domain directories.
+  - `listAllHandledDomains` supports PEM file names in subdirectories.
+
+- `LetsEncrypt.requestCertificate`: throws `ArgumentError` for an invalid
+  domain name before creating any account or domain keys.
 
 ## 2.0.3
 

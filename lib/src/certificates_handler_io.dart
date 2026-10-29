@@ -72,9 +72,8 @@ class CertificatesHandlerIO extends CertificatesHandler {
         !Domain(name: dirName, email: '').isValidName) {
       return false;
     }
-
-    // The configured PEM filenames may contain subdirectories. The caller
-    // checks whether a complete certificate is present after this filter.
+    // Configured PEM filenames can contain subdirectories. The caller checks
+    // whether a complete certificate exists after this directory filter.
     return true;
   }
 
