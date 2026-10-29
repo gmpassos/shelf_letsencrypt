@@ -2,13 +2,13 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:basic_utils/basic_utils.dart' hide Domain;
-import 'package:collection/collection.dart';
 import 'package:path/path.dart' as pack_path;
 
 import 'certs_handler.dart';
 import 'domain.dart';
 import 'domain_certificate_file_path.dart';
 import 'pem_key_pair.dart';
+import 'private_key_storage.dart';
 import 'security_context_builder.dart';
 
 /// A [CertificatesHandler] implementation using [dart:io].
@@ -18,11 +18,12 @@ class CertificatesHandlerIO extends CertificatesHandler {
       super.privateKeyPEMFileName,
       super.publicKeyPEMFileName,
       super.fullChainPEMFileName}) {
-    directory.createSync(recursive: true);
+    _storage = PrivateKeyStorage(directory);
   }
 
   /// The [Directory] to storage certificates.
   final Directory directory;
+  late final PrivateKeyStorage _storage;
 
   @override
   List<String> listAllHandledDomains({bool checkSecurityContext = true}) {
@@ -38,39 +39,20 @@ class CertificatesHandlerIO extends CertificatesHandler {
   }
 
   bool _isDomainDirectory(FileSystemEntity e) {
-    if (e.statSync().type != FileSystemEntityType.directory) {
+    if (FileSystemEntity.typeSync(e.path, followLinks: false) !=
+        FileSystemEntityType.directory) {
       return false;
     }
 
     final dirName = _pathFileName(e.path);
 
-    if (dirName == accountDirectory || dirName.startsWith('.')) {
+    if (dirName == accountDirectory ||
+        !Domain(name: dirName, email: '').isValidName) {
       return false;
     }
 
-    final dir = Directory(e.path);
-
-    final files = dir.listSync(followLinks: false);
-    final pemFiles = files.where((f) => f.path.endsWith('pem')).toList();
-
-    if (pemFiles.isEmpty) {
-      return false;
-    }
-
-    final fullChainFile =
-        pemFiles.firstWhereOrNull((f) => f.path.endsWith(fullChainPEMFileName));
-
-    if (fullChainFile == null) {
-      return false;
-    }
-
-    final privateKeyFile = pemFiles
-        .firstWhereOrNull((f) => f.path.endsWith(privateKeyPEMFileName));
-
-    if (privateKeyFile == null) {
-      return false;
-    }
-
+    // The configured PEM filenames may contain subdirectories. The caller
+    // checks whether a complete certificate is present after this filter.
     return true;
   }
 
@@ -81,6 +63,9 @@ class CertificatesHandlerIO extends CertificatesHandler {
       List<Domain> domains,
       {bool allowUnresolvedDomain = false,
       bool loadAllHandledDomains = true}) async {
+    for (final domain in domains) {
+      _checkedDomain(domain.name);
+    }
     final securityContextBuilder = SecurityContextBuilder();
 
     var resolvedDomains = <Domain>{};
@@ -118,6 +103,7 @@ class CertificatesHandlerIO extends CertificatesHandler {
       SecurityContextBuilder securityContextBuilder, String domain) async {
     final fullChainFile = fileDomainFullChainPEM(domain);
     final privateKeyFile = fileDomainPrivateKeyPEM(domain);
+    _storage.secureExistingKey(privateKeyFile);
 
     if (!_fileExistsWithContent(fullChainFile) ||
         !_fileExistsWithContent(privateKeyFile)) {
@@ -138,6 +124,7 @@ class CertificatesHandlerIO extends CertificatesHandler {
       {bool checkSecurityContext = true}) {
     final fullChainFile = fileDomainFullChainPEM(domain);
     final privateKeyFile = fileDomainPrivateKeyPEM(domain);
+    _storage.secureExistingKey(privateKeyFile);
 
     if (!_fileExistsWithContent(fullChainFile) ||
         !_fileExistsWithContent(privateKeyFile)) {
@@ -175,18 +162,26 @@ class CertificatesHandlerIO extends CertificatesHandler {
   File fileAccountPublicKeyPEM() => File(
       pack_path.join(directory.path, accountDirectory, publicKeyPEMFileName));
 
-  File fileDomainPrivateKeyPEM(String cn) =>
-      File(pack_path.join(directory.path, cn, privateKeyPEMFileName));
+  File fileDomainPrivateKeyPEM(String cn) => File(pack_path.join(
+      directory.path, _checkedDomain(cn), privateKeyPEMFileName));
 
-  File fileDomainPublicKeyPEM(String cn) =>
-      File(pack_path.join(directory.path, cn, publicKeyPEMFileName));
+  File fileDomainPublicKeyPEM(String cn) => File(
+      pack_path.join(directory.path, _checkedDomain(cn), publicKeyPEMFileName));
 
-  File fileDomainFullChainPEM(String cn) =>
-      File(pack_path.join(directory.path, cn, fullChainPEMFileName));
+  File fileDomainFullChainPEM(String cn) => File(
+      pack_path.join(directory.path, _checkedDomain(cn), fullChainPEMFileName));
+
+  String _checkedDomain(String cn) {
+    if (!Domain(name: cn, email: '').isValidName) {
+      throw ArgumentError.value(cn, 'cn', 'Invalid domain name');
+    }
+    return cn;
+  }
 
   @override
   FutureOr<String?> loadAccountPrivateKeyPEM() {
     final file = fileAccountPrivateKeyPEM();
+    _storage.secureExistingKey(file);
     return _readFileWithContent(file);
   }
 
@@ -199,6 +194,7 @@ class CertificatesHandlerIO extends CertificatesHandler {
   @override
   FutureOr<String?> loadDomainPrivateKeyPEM(String cn) {
     final file = fileDomainPrivateKeyPEM(cn);
+    _storage.secureExistingKey(file);
     return _readFileWithContent(file);
   }
 
@@ -223,7 +219,8 @@ class CertificatesHandlerIO extends CertificatesHandler {
     final filePrivateKey = fileAccountPrivateKeyPEM();
     final filePublicKey = fileAccountPublicKeyPEM();
 
-    return _generateStoredKeyPair(filePrivateKey, filePublicKey, force);
+    return _generateStoredKeyPair(
+        filePrivateKey, filePublicKey, force, getAccountPEMKeyPair);
   }
 
   @override
@@ -232,23 +229,38 @@ class CertificatesHandlerIO extends CertificatesHandler {
     final filePrivateKey = fileDomainPrivateKeyPEM(cn);
     final filePublicKey = fileDomainPublicKeyPEM(cn);
 
-    return _generateStoredKeyPair(filePrivateKey, filePublicKey, force);
+    return _generateStoredKeyPair(
+        filePrivateKey, filePublicKey, force, () => getDomainPEMKeyPair(cn));
   }
 
   Future<PEMKeyPair?> _generateStoredKeyPair(
-      File filePrivateKey, File filePublicKey, bool force) async {
-    if (!force &&
-        (_fileExistsWithContent(filePrivateKey) ||
-            _fileExistsWithContent(filePublicKey))) {
-      return getAccountPEMKeyPair();
+      File filePrivateKey,
+      File filePublicKey,
+      bool force,
+      Future<PEMKeyPair?> Function() loadExisting) async {
+    _storage.secureExistingKey(filePrivateKey);
+    final hasPrivate = _fileExistsWithContent(filePrivateKey);
+    final hasPublic = _fileExistsWithContent(filePublicKey);
+    if (!force && (hasPrivate || hasPublic)) {
+      if (!hasPrivate || !hasPublic) {
+        throw StateError('Stored key pair is incomplete');
+      }
+      final existing = await loadExisting();
+      if (existing == null ||
+          existing.privateKey.modulus != existing.publicKey.modulus) {
+        throw StateError('Stored private and public keys do not match');
+      }
+      return existing;
     }
 
     final keyPair = generatePEMKeyPair();
-
-    filePrivateKey.parent.createSync(recursive: true);
+    _storage.prepareKeyParent(filePrivateKey.parent);
     filePublicKey.parent.createSync(recursive: true);
-
-    filePrivateKey.writeAsStringSync(keyPair.privateKeyPEM);
+    if (FileSystemEntity.typeSync(filePublicKey.path, followLinks: false) ==
+        FileSystemEntityType.link) {
+      throw FileSystemException('Public key is a link', filePublicKey.path);
+    }
+    _storage.writeKey(filePrivateKey, keyPair.privateKeyPEM);
     filePublicKey.writeAsStringSync(keyPair.publicKeyPEM);
 
     return keyPair;
@@ -304,6 +316,11 @@ class CertificatesHandlerIO extends CertificatesHandler {
     final filePrivateKey = fileDomainFullChainPEM(cn);
 
     filePrivateKey.parent.createSync(recursive: true);
+    if (FileSystemEntity.typeSync(filePrivateKey.path, followLinks: false) ==
+        FileSystemEntityType.link) {
+      throw FileSystemException(
+          'Certificate chain is a link', filePrivateKey.path);
+    }
     filePrivateKey.writeAsStringSync(fullChainPEM);
 
     return true;

@@ -21,6 +21,35 @@
 LetsEncrypt provide a few challenges for your development enviroment. 
 Read on for a few hints.
 
+## Certificate storage security
+
+`CertificatesHandlerIO` uses an owner-only storage backend on Linux. It
+creates managed directories with mode `0700` and private keys with mode `0600`
+before writing key material. On reuse, it tightens existing key permissions
+without changing the key bytes. Existing keys that may already have been read
+by another user should be rotated by the operator.
+
+The built-in IO handler fails before storage access on Windows, macOS, Android,
+iOS, and other unsupported systems. Applications on those systems need a
+`CertificatesHandler` implementation with an access-control policy appropriate
+to that platform. In particular, POSIX mode checks alone do not enforce a
+private Windows DACL or exclude macOS ACL readers.
+
+Use a service-owned certificate directory under trusted ancestors. A shared
+sticky parent such as `/tmp` is suitable only when its owner is trusted. Do not
+place storage under a directory another user can replace. External private-key
+paths configured through the constructor must already have an owner-only
+parent. Network filesystems and another process running as the service user
+are outside this backend's protection. If an existing store has a different
+owner, a symlinked key, or an external hard link, construction or key loading
+fails so the operator can migrate it deliberately.
+
+Certificate domain names must be ASCII DNS names with at least two labels.
+Each label must be 1–63 letters, digits, or hyphens and start and end with a
+letter or digit. This accepts multi-label and punycode names; it rejects path
+separators, traversal components, wildcards, and trailing dots before a domain
+can select a certificate path.
+
 ## A word of caution
 LetsEncrypt rate limits the issuing of production certificates.
 It is very easy to get locked out of letsencrypt for an extended period of time (days)
@@ -110,9 +139,12 @@ void main(List<String> args) async {
   final domainNamesArg = args[0]; // Domains for the HTTPS certificate.
   final domainEmailsArg = args[1]; // The domains e-mail.
 
+  final home = Platform.environment['HOME'];
   var certificatesDirectory = args.length > 2
       ? args[2] // Optional argument.
-      : '/tmp/shelf-letsencrypt-example/'; // Default directory.
+      : home == null
+          ? (throw StateError('Pass a certificate directory as argument 3'))
+          : '$home/.shelf-letsencrypt-example';
 
   final domains =
   Domain.fromDomainsNamesAndEmailsArgs(domainNamesArg, domainEmailsArg);

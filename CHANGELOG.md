@@ -1,3 +1,10 @@
+## Unreleased security patch
+
+- Validate certificate domain names before domain-derived filesystem access.
+- Store and migrate owner-only private keys on Linux. The built-in IO storage
+  handler now fails closed on other platforms pending dedicated ACL backends.
+- Preserve multi-label domain names and nested configured PEM paths.
+
 ## 2.0.3
 
 - multi_domain_secure_server: ^1.0.16

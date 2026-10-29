@@ -4,6 +4,7 @@ import 'dart:io';
 
 import 'package:basic_utils/basic_utils.dart' hide Domain;
 import 'package:path/path.dart' as pack_path;
+import 'package:posix/posix.dart' as posix;
 import 'package:shelf/shelf.dart';
 import 'package:shelf_letsencrypt/shelf_letsencrypt.dart';
 import 'package:test/test.dart';
@@ -13,6 +14,7 @@ void main() {
     late Directory tmpDir;
     setUp(() {
       tmpDir = Directory.systemTemp.createTempSync('dart-test-1-tmp-');
+      posix.chmod(tmpDir.path, '700');
       print('TMP DIR: $tmpDir');
     });
 
@@ -51,6 +53,123 @@ void main() {
       expect(csrSign, isNotEmpty);
     });
 
+    test('private keys and certificate directories are private', () async {
+      if (Platform.isWindows) return;
+      final handler = CertificatesHandlerIO(
+          Directory(pack_path.join(tmpDir.path, 'private-certs')));
+      await handler.generateAccountPEMKeyPair();
+      await handler.generateDomainPEMKeyPair('example.com');
+
+      expect(handler.directory.statSync().mode & 0x3f, 0);
+      expect(handler.fileAccountPrivateKeyPEM().statSync().mode & 0x3f, 0);
+      expect(
+          handler.fileDomainPrivateKeyPEM('example.com').statSync().mode & 0x3f,
+          0);
+      expect(
+          handler
+                  .fileDomainPrivateKeyPEM('example.com')
+                  .parent
+                  .statSync()
+                  .mode &
+              0x3f,
+          0);
+    });
+
+    test('existing permissive keys are secured without changing identity',
+        () async {
+      final root = Directory(pack_path.join(tmpDir.path, 'existing-certs'));
+      final first = CertificatesHandlerIO(root);
+      final account = await first.generateAccountPEMKeyPair();
+      final domain = await first.generateDomainPEMKeyPair('example.com');
+      final accountPem = account!.privateKeyPEM;
+      final domainPem = domain!.privateKeyPEM;
+
+      posix.chmod(first.fileAccountPrivateKeyPEM().path, '644');
+      posix.chmod(first.fileDomainPrivateKeyPEM('example.com').path, '644');
+      posix.chmod(first.fileAccountPrivateKeyPEM().parent.path, '755');
+      posix.chmod(
+          first.fileDomainPrivateKeyPEM('example.com').parent.path, '755');
+      posix.chmod(root.path, '755');
+
+      final migrated = CertificatesHandlerIO(root);
+      expect(
+          (await migrated.getAccountPEMKeyPair())!.privateKeyPEM, accountPem);
+      expect((await migrated.getDomainPEMKeyPair('example.com'))!.privateKeyPEM,
+          domainPem);
+      expect(root.statSync().mode & 0x3f, 0);
+      expect(migrated.fileAccountPrivateKeyPEM().statSync().mode & 0x3f, 0);
+      expect(
+          migrated.fileDomainPrivateKeyPEM('example.com').statSync().mode &
+              0x3f,
+          0);
+    });
+
+    test('private-key links and incomplete pairs fail closed', () async {
+      final handler = CertificatesHandlerIO(
+          Directory(pack_path.join(tmpDir.path, 'linked-certs')));
+      final pair = await handler.generateDomainPEMKeyPair('example.com');
+      expect(pair, isNotNull);
+
+      final publicKey = handler.fileDomainPublicKeyPEM('example.com');
+      publicKey.deleteSync();
+      await expectLater(
+          handler.generateDomainPEMKeyPair('example.com'), throwsStateError);
+      expect(
+          handler.fileDomainPrivateKeyPEM('example.com').existsSync(), isTrue);
+
+      final outside = File(pack_path.join(tmpDir.path, 'outside-private.pem'))
+        ..writeAsStringSync('sentinel');
+      final privateKey = handler.fileDomainPrivateKeyPEM('example.com');
+      privateKey.deleteSync();
+      Link(privateKey.path).createSync(outside.path);
+      expect(() => handler.loadDomainPrivateKeyPEM('example.com'),
+          throwsA(isA<FileSystemException>()));
+      expect(outside.readAsStringSync(), 'sentinel');
+    });
+
+    test('nested configured key and public paths still work', () async {
+      final handler = CertificatesHandlerIO(
+          Directory(pack_path.join(tmpDir.path, 'nested-certs')),
+          privateKeyPEMFileName: 'private/privkey.pem',
+          publicKeyPEMFileName: 'public/pubkey.pem');
+      final pair = await handler.generateAccountPEMKeyPair();
+      expect(pair, isNotNull);
+      expect(handler.fileAccountPrivateKeyPEM().existsSync(), isTrue);
+      expect(handler.fileAccountPublicKeyPEM().existsSync(), isTrue);
+      expect(
+          handler.fileAccountPrivateKeyPEM().parent.statSync().mode & 0x3f, 0);
+    });
+
+    test('domain names cannot escape certificate storage', () async {
+      final handler = CertificatesHandlerIO(
+          Directory(pack_path.join(tmpDir.path, 'bounded-certs')));
+      for (final invalid in ['../outside', r'..\outside', '/outside', 'a/b']) {
+        expect(() => handler.fileDomainPrivateKeyPEM(invalid),
+            throwsArgumentError);
+        expect(
+            () => handler.fileDomainPublicKeyPEM(invalid), throwsArgumentError);
+        expect(
+            () => handler.fileDomainFullChainPEM(invalid), throwsArgumentError);
+        await expectLater(
+            handler.generateDomainPEMKeyPair(invalid), throwsArgumentError);
+        await expectLater(handler.saveSignedCertificateChain(invalid, ['test']),
+            throwsArgumentError);
+      }
+      expect(Directory(pack_path.join(tmpDir.path, 'outside')).existsSync(),
+          isFalse);
+    });
+
+    test('multi-label domains remain valid storage names', () async {
+      final handler = CertificatesHandlerIO(
+          Directory(pack_path.join(tmpDir.path, 'multi-label-certs')));
+      for (final name in ['api.dev.example.com', 'www.example.co.uk']) {
+        expect(Domain(name: name, email: '').isValidName, isTrue);
+        final key = await handler.generateDomainPEMKeyPair(name);
+        expect(key, isNotNull);
+        expect(handler.fileDomainPrivateKeyPEM(name).existsSync(), isTrue);
+      }
+    });
+
     tearDown(() {
       tmpDir.deleteSync(recursive: true);
     });
@@ -60,6 +179,7 @@ void main() {
     late Directory tmpDir;
     setUp(() {
       tmpDir = Directory.systemTemp.createTempSync('dart-test-1-tmp-');
+      posix.chmod(tmpDir.path, '700');
       print('TMP DIR: $tmpDir');
     });
 
@@ -80,6 +200,20 @@ void main() {
       );
 
       expect(checkCertificateStatus, equals(CheckCertificateStatus.invalid));
+    });
+
+    test('invalid request domain has no storage side effects', () async {
+      final handler = CertificatesHandlerIO(
+          Directory(pack_path.join(tmpDir.path, 'rejected-domain-certs')));
+      final letsEncrypt = LetsEncrypt(handler);
+
+      await expectLater(
+          letsEncrypt.requestCertificate(
+              const Domain(name: '../outside', email: 'contact@example.com')),
+          throwsArgumentError);
+      expect(handler.fileAccountPrivateKeyPEM().existsSync(), isFalse);
+      expect(Directory(pack_path.join(tmpDir.path, 'outside')).existsSync(),
+          isFalse);
     });
 
     test('ACME path + processACMEChallengeRequest', () async {

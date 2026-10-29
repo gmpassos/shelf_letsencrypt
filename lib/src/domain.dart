@@ -43,8 +43,10 @@ class Domain {
 
   const Domain({required this.name, required this.email});
 
+  /// ASCII DNS labels are also safe as individual storage-directory names.
+  /// A label cannot contain a path separator, a drive prefix, or `..`.
   static final regexpDomainName = RegExp(
-      r'^(?!-)[A-Za-z0-9-]{1,63}(?<!-)\.(?!-)([A-Za-z0-9-]{1,63})(\.[A-Za-z]{2,})?$');
+      r'^(?=.{1,253}$)(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$');
 
   bool get isValidName => regexpDomainName.hasMatch(name);
 
