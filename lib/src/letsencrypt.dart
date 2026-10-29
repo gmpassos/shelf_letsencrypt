@@ -178,19 +178,24 @@ class LetsEncrypt {
     return certs;
   }
 
-  Future<bool> _initializeClient(AcmeClient client, String cn) async {
+  Future<void> _initializeClient(AcmeClient client, String cn) async {
     try {
       await client.init();
-      return true;
     } catch (e, s) {
       logger.error(e, s);
+    }
+    // `init` returns without an account when the lookup or creation fails.
+    if (client.directories == null || client.account == null) {
       await _initializeClientFallback(client, cn);
-      return true;
     }
   }
 
   Future<void> _initializeClientFallback(AcmeClient client, String cn) async {
     logger.info('Trying initialization fallback...');
+
+    if (client.directories == null) {
+      throw StateError("Can't load the ACME directory for domain: $cn");
+    }
 
     Account? account;
     try {
@@ -211,6 +216,7 @@ class LetsEncrypt {
     if (account == null) {
       throw StateError("Can't initialize account for domain: $cn");
     }
+    client.account = account;
   }
 
   Future<bool> _selfChallengeTest(

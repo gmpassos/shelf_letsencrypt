@@ -48,6 +48,9 @@
   - `getURL`: closes its `HttpClient` and uses a 30s connection timeout.
   - `doACMEChallenge`: throws `StateError` when the order can't be created,
     and always removes the challenge token when it finishes.
+  - The ACME account fallback now applies the account it finds or creates
+    (the order used to fail with a null-check error), and also runs when
+    the client initialization ends without an account.
   - `processACMEChallengeRequest`: matches the host case-insensitively and
     supports IPv6 `Host` headers.
 
@@ -56,6 +59,13 @@
 
 - Example: the renewal service restarts the current servers. It used to close
   the first servers again, failing on the next renewal.
+
+- Tests:
+  - Integration tests of the full ACME flow (issuance, reuse, renewal, SNI
+    with multiple domains and every failure path) against an in-process fake
+    ACME server with real HTTP-01 validation.
+  - Line coverage from 61% to over 93%; CI runs on Linux and macOS and fails
+    below 90%.
 
 ## 2.0.3
 
