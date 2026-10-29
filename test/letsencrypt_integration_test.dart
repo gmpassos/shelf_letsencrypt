@@ -42,6 +42,10 @@ void main() {
       Process.runSync('chmod', ['700', tmpDir.path]);
     }
     final port = await freePort();
+    var securePort = await freePort();
+    while (securePort == port) {
+      securePort = await freePort();
+    }
     acme = FakeAcmeServer(challengePort: port);
     await acme.start();
     logs = [];
@@ -49,7 +53,7 @@ void main() {
         CertificatesHandlerIO(Directory(pack_path.join(tmpDir.path, 'certs'))),
         acme,
         port: port,
-        securePort: await freePort(),
+        securePort: securePort,
         log: (level, message, error, stackTrace) =>
             logs.add('[$level] $message ${error ?? ''}'));
   });
@@ -130,7 +134,10 @@ void main() {
 
       await startServer([_domain]);
       expect(acme.certificatesIssued, equals(1));
-      expect(logs, contains(contains('CheckCertificateStatus.ok')));
+      expect(
+          logs,
+          contains(
+              endsWith('CheckCertificateStatus: CheckCertificateStatus.ok ')));
     });
 
     test('renews with forceRequestCertificate and restarts HTTPS', () async {
@@ -195,6 +202,23 @@ void main() {
           startServer([_domain], forceRequestCertificate: true),
           throwsA(isA<StateError>().having((e) => e.message, 'message',
               contains('Certificate check error'))));
+
+      // The HTTPS server was running when the check failed:
+      for (final port in [letsEncrypt.port, letsEncrypt.securePort]) {
+        final socket =
+            await ServerSocket.bind(InternetAddress.loopbackIPv4, port);
+        await socket.close();
+      }
+    });
+
+    test('handles a mixed-case domain', () async {
+      const mixedCase =
+          Domain(name: 'WWW.Example.com', email: 'admin@example.com');
+      await startServer([mixedCase]);
+      expect(acme.certificatesIssued, equals(1));
+
+      final (body, _) = await get(https(mixedCase));
+      expect(body, equals('Hello www.example.com'));
     });
   });
 

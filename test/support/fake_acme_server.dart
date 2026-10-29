@@ -8,7 +8,8 @@ import 'package:shelf/shelf_io.dart';
 /// A minimal in-process ACME server (RFC 8555) with the subset of the protocol
 /// used by `package:acme_client`.
 ///
-/// It does not verify JWS signatures, but it performs a real HTTP-01
+/// It does not verify JWS signatures, but it rejects replayed nonces like Let's
+/// Encrypt (`badNonce`), and it performs a real HTTP-01
 /// validation: it fetches the challenge from [challengePort] (on loopback, see
 /// `LoopbackHttpOverrides`) and only issues a certificate when the key
 /// authorization matches.
@@ -48,6 +49,7 @@ class FakeAcmeServer {
   final _orders = <_Order>[];
   final _caKeyPair = CryptoUtils.generateRSAKeyPair();
   var _nonce = 0;
+  final _unusedNonces = <String>{};
 
   /// The server URL. It still points to the closed port after [close].
   late String baseUrl;
@@ -79,6 +81,10 @@ class FakeAcmeServer {
     if (request.method != 'POST') return Response.notFound(null);
 
     final jws = _Jws.parse(await request.readAsString());
+    // Like Let's Encrypt, accept each issued nonce only once.
+    if (!_unusedNonces.remove(jws.protected['nonce'])) {
+      return _error(400, 'badNonce');
+    }
     switch (name) {
       case 'account':
         return _account(jws);
@@ -178,7 +184,11 @@ class FakeAcmeServer {
     });
   }
 
-  Map<String, String> _nonceHeader() => {'Replay-Nonce': 'nonce-${_nonce++}'};
+  Map<String, String> _nonceHeader() {
+    final nonce = 'nonce-${_nonce++}';
+    _unusedNonces.add(nonce);
+    return {'Replay-Nonce': nonce};
+  }
 
   Response _json(Object body, {int status = 200, String? location}) =>
       Response(status, body: json.encode(body), headers: {

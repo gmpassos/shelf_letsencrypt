@@ -55,10 +55,11 @@ class LetsEncrypt {
       ? 'https://acme-v02.api.letsencrypt.org'
       : 'https://acme-staging-v02.api.letsencrypt.org';
 
+  /// Challenge tokens by lower-case domain: DNS names are case-insensitive.
   final Map<String, String> _challengesTokens = <String, String>{};
 
   /// Returns a challenge toke for [cn] (if one is being executed).
-  String? getChallengeToken(String cn) => _challengesTokens[cn];
+  String? getChallengeToken(String cn) => _challengesTokens[cn.toLowerCase()];
 
   static final RegExp _regexpContactMethodPrefix = RegExp(r'^\w+:');
 
@@ -114,12 +115,12 @@ class LetsEncrypt {
     final mainAuth = auth.first;
     final challengeData = mainAuth.getHttpDcvData();
 
-    _challengesTokens[cn] = challengeData.fileContent;
+    _challengesTokens[cn.toLowerCase()] = challengeData.fileContent;
     try {
       return await _completeChallenge(
           client, cn, newOrder, mainAuth, challengeData, domainCSR);
     } finally {
-      _challengesTokens.remove(cn);
+      _challengesTokens.remove(cn.toLowerCase());
     }
   }
 
@@ -197,8 +198,11 @@ class LetsEncrypt {
       throw StateError("Can't load the ACME directory for domain: $cn");
     }
 
+    // `AcmeClient` only takes a new nonce from successful responses, so the
+    // current one may be spent: let it fetch a fresh nonce for each request.
     Account? account;
     try {
+      client.nonce = null;
       account = await client.getAccount(createIfnotExists: false);
     } catch (e, s) {
       logger.error(e, s);
@@ -207,6 +211,7 @@ class LetsEncrypt {
     try {
       if (account == null) {
         logger.info('Creating account...');
+        client.nonce = null;
         account = await client.createAccount();
       }
     } catch (e, s) {
@@ -272,9 +277,8 @@ class LetsEncrypt {
   ///
   /// See [isACMEPath].
   Response processACMEChallengeRequest(Request request) {
-    // `requestedUri.host` comes from the `Host` header, without the port and
-    // lower-cased.
-    final cn = request.requestedUri.host;
+    final host = request.headers['host'] ?? '';
+    final cn = host.split(':')[0];
 
     final challengeToken = getChallengeToken(cn);
 

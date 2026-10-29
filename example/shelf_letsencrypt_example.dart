@@ -71,23 +71,27 @@ Future<({HttpServer http, HttpServer https})> _startServer(
 /// Check every hour if any of the certificates need to be renewed.
 void _startRenewalService(LetsEncrypt letsEncrypt, List<Domain> domains,
     ({HttpServer http, HttpServer https}) servers) {
+  ({HttpServer http, HttpServer https})? current = servers;
   Cron().schedule(
       Schedule(hours: '*/1'), // every hour
       () async =>
-          servers = await refreshIfRequired(letsEncrypt, domains, servers));
+          current = await refreshIfRequired(letsEncrypt, domains, current));
 }
 
-/// Returns the servers to use from now on: new ones if they were restarted.
-Future<({HttpServer http, HttpServer https})> refreshIfRequired(
+/// Returns the servers to use from now on: new ones if they were restarted,
+/// or `null` if they are stopped because the restart failed. Then [servers]
+/// is `null` on the next call, which restarts them.
+Future<({HttpServer http, HttpServer https})?> refreshIfRequired(
   LetsEncrypt letsEncrypt,
   List<Domain> domains,
-  ({HttpServer http, HttpServer https}) servers,
+  ({HttpServer http, HttpServer https})? servers,
 ) async {
   print('-- Checking if any certificates need to be renewed');
 
-  var restartRequired = false;
+  // Without servers the HTTP challenge can't be served: restart first.
+  var restartRequired = servers == null;
 
-  for (final domain in domains) {
+  for (final domain in servers == null ? <Domain>[] : domains) {
     final result =
         await letsEncrypt.checkCertificate(domain, requestCertificate: true);
 
@@ -102,10 +106,17 @@ Future<({HttpServer http, HttpServer https})> refreshIfRequired(
   if (!restartRequired) return servers;
 
   // Restart the servers:
-  await Future.wait<void>([servers.http.close(), servers.https.close()]);
-  final restarted = await _startServer(letsEncrypt, domains);
-  print('** Services restarted');
-  return restarted;
+  if (servers != null) {
+    await Future.wait<void>([servers.http.close(), servers.https.close()]);
+  }
+  try {
+    final restarted = await _startServer(letsEncrypt, domains);
+    print('** Services restarted');
+    return restarted;
+  } catch (e) {
+    print('** Restart failed, retrying on the next check: $e');
+    return null;
+  }
 }
 
 Response _processRequest(Request request) =>

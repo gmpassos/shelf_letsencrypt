@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:math';
 
 /// Routes every [HttpClient] connection to the loopback interface, keeping the
 /// requested host for the `Host` header and TLS SNI. Tests can then use real
@@ -23,10 +24,23 @@ class LoopbackHttpOverrides extends HttpOverrides {
   }
 }
 
+final _random = Random();
+
 /// Returns a free TCP port on the loopback interface.
+///
+/// It is chosen below the ephemeral range (from 32768 on Linux, 49152 on
+/// macOS and Windows), so that outgoing connections can't take it as their
+/// source port while a test closes and binds it again.
 Future<int> freePort() async {
-  final socket = await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);
-  final port = socket.port;
-  await socket.close();
-  return port;
+  while (true) {
+    final port = 20000 + _random.nextInt(10000);
+    try {
+      final socket =
+          await ServerSocket.bind(InternetAddress.loopbackIPv4, port);
+      await socket.close();
+      return port;
+    } on SocketException {
+      // In use: try another one.
+    }
+  }
 }
