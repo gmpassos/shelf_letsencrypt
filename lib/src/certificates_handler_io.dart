@@ -2,7 +2,6 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:basic_utils/basic_utils.dart' hide Domain;
-import 'package:collection/collection.dart';
 import 'package:path/path.dart' as pack_path;
 
 import 'certs_handler.dart';
@@ -38,39 +37,19 @@ class CertificatesHandlerIO extends CertificatesHandler {
   }
 
   bool _isDomainDirectory(FileSystemEntity e) {
-    if (e.statSync().type != FileSystemEntityType.directory) {
+    if (FileSystemEntity.typeSync(e.path, followLinks: false) !=
+        FileSystemEntityType.directory) {
       return false;
     }
 
     final dirName = _pathFileName(e.path);
 
-    if (dirName == accountDirectory || dirName.startsWith('.')) {
+    if (dirName == accountDirectory ||
+        !Domain(name: dirName, email: '').isValidName) {
       return false;
     }
-
-    final dir = Directory(e.path);
-
-    final files = dir.listSync(followLinks: false);
-    final pemFiles = files.where((f) => f.path.endsWith('pem')).toList();
-
-    if (pemFiles.isEmpty) {
-      return false;
-    }
-
-    final fullChainFile =
-        pemFiles.firstWhereOrNull((f) => f.path.endsWith(fullChainPEMFileName));
-
-    if (fullChainFile == null) {
-      return false;
-    }
-
-    final privateKeyFile = pemFiles
-        .firstWhereOrNull((f) => f.path.endsWith(privateKeyPEMFileName));
-
-    if (privateKeyFile == null) {
-      return false;
-    }
-
+    // Configured PEM filenames can contain subdirectories. The caller checks
+    // whether a complete certificate exists after this directory filter.
     return true;
   }
 
@@ -81,6 +60,9 @@ class CertificatesHandlerIO extends CertificatesHandler {
       List<Domain> domains,
       {bool allowUnresolvedDomain = false,
       bool loadAllHandledDomains = true}) async {
+    for (final domain in domains) {
+      _checkedDomain(domain.name);
+    }
     final securityContextBuilder = SecurityContextBuilder();
 
     var resolvedDomains = <Domain>{};
@@ -175,14 +157,21 @@ class CertificatesHandlerIO extends CertificatesHandler {
   File fileAccountPublicKeyPEM() => File(
       pack_path.join(directory.path, accountDirectory, publicKeyPEMFileName));
 
-  File fileDomainPrivateKeyPEM(String cn) =>
-      File(pack_path.join(directory.path, cn, privateKeyPEMFileName));
+  File fileDomainPrivateKeyPEM(String cn) => File(pack_path.join(
+      directory.path, _checkedDomain(cn), privateKeyPEMFileName));
 
-  File fileDomainPublicKeyPEM(String cn) =>
-      File(pack_path.join(directory.path, cn, publicKeyPEMFileName));
+  File fileDomainPublicKeyPEM(String cn) => File(
+      pack_path.join(directory.path, _checkedDomain(cn), publicKeyPEMFileName));
 
-  File fileDomainFullChainPEM(String cn) =>
-      File(pack_path.join(directory.path, cn, fullChainPEMFileName));
+  File fileDomainFullChainPEM(String cn) => File(
+      pack_path.join(directory.path, _checkedDomain(cn), fullChainPEMFileName));
+
+  String _checkedDomain(String cn) {
+    if (!Domain(name: cn, email: '').isValidName) {
+      throw ArgumentError.value(cn, 'cn', 'Invalid domain name');
+    }
+    return cn;
+  }
 
   @override
   FutureOr<String?> loadAccountPrivateKeyPEM() {
