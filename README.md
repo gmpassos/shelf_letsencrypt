@@ -39,7 +39,10 @@ Use a service-owned certificate directory under trusted ancestors. A shared
 sticky parent such as `/tmp` is suitable only when its owner is trusted. Do not
 place storage under a directory another user can replace. External private-key
 paths configured through the constructor must already have an owner-only
-parent. Network filesystems and another process running as the service user
+parent. The storage root and configured PEM paths cannot contain `..`
+path components; the handler resolves the storage root to one absolute path
+for permission checks and file operations. Network filesystems and another
+process running as the service user
 are outside this backend's protection. If an existing store has a different
 owner, a symlinked key, or an external hard link, construction or key loading
 fails so the operator can migrate it deliberately.

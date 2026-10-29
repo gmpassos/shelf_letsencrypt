@@ -140,6 +140,44 @@ void main() {
           handler.fileAccountPrivateKeyPEM().parent.statSync().mode & 0x3f, 0);
     });
 
+    test('invalid public destination fails before private-key creation',
+        () async {
+      final handler = CertificatesHandlerIO(
+          Directory(pack_path.join(tmpDir.path, 'invalid-public-certs')));
+      final publicKey = handler.fileAccountPublicKeyPEM();
+      publicKey.parent.createSync(recursive: true);
+      Directory(publicKey.path).createSync();
+
+      await expectLater(handler.generateAccountPEMKeyPair(),
+          throwsA(isA<FileSystemException>()));
+      expect(handler.fileAccountPrivateKeyPEM().existsSync(), isFalse);
+    });
+
+    test('storage checks and writes cannot resolve different roots', () {
+      final safe = Directory(pack_path.join(tmpDir.path, 'safe'))..createSync();
+      final elsewhere = Directory(pack_path.join(tmpDir.path, 'elsewhere'))
+        ..createSync();
+      final child = Directory(pack_path.join(elsewhere.path, 'child'))
+        ..createSync();
+      final actual = Directory(pack_path.join(elsewhere.path, 'store'))
+        ..createSync();
+      posix.chmod(actual.path, '755');
+      Link(pack_path.join(safe.path, 'link')).createSync(child.path);
+
+      expect(
+          () => CertificatesHandlerIO(
+              Directory(pack_path.join(safe.path, 'link', '..', 'store'))),
+          throwsArgumentError);
+      expect(actual.statSync().mode & 0x3f, isNot(0));
+      expect(
+          Directory(pack_path.join(safe.path, 'store')).existsSync(), isFalse);
+      expect(
+          () => CertificatesHandlerIO(
+              Directory(pack_path.join(tmpDir.path, 'configured-paths')),
+              privateKeyPEMFileName: 'link/../privkey.pem'),
+          throwsArgumentError);
+    });
+
     test('domain names cannot escape certificate storage', () async {
       final handler = CertificatesHandlerIO(
           Directory(pack_path.join(tmpDir.path, 'bounded-certs')));

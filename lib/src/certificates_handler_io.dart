@@ -13,12 +13,34 @@ import 'security_context_builder.dart';
 
 /// A [CertificatesHandler] implementation using [dart:io].
 class CertificatesHandlerIO extends CertificatesHandler {
-  CertificatesHandlerIO(this.directory,
+  CertificatesHandlerIO(Directory directory,
       {super.accountDirectory,
       super.privateKeyPEMFileName,
       super.publicKeyPEMFileName,
-      super.fullChainPEMFileName}) {
-    _storage = PrivateKeyStorage(directory);
+      super.fullChainPEMFileName})
+      : directory = _checkedStorageDirectory(directory) {
+    for (final configuredPath in [
+      accountDirectory,
+      privateKeyPEMFileName,
+      publicKeyPEMFileName,
+      fullChainPEMFileName
+    ]) {
+      if (pack_path.split(configuredPath).any((part) => part == '..')) {
+        throw ArgumentError.value(configuredPath, 'configuredPath',
+            'Certificate paths cannot contain parent components');
+      }
+    }
+    _storage = PrivateKeyStorage(this.directory);
+  }
+
+  static Directory _checkedStorageDirectory(Directory directory) {
+    final absolutePath = directory.absolute.path;
+    if (pack_path.split(directory.path).contains('..') ||
+        pack_path.split(absolutePath).contains('..')) {
+      throw ArgumentError.value(directory.path, 'directory',
+          'Certificate storage path cannot contain parent components');
+    }
+    return Directory(pack_path.normalize(absolutePath));
   }
 
   /// The [Directory] to storage certificates.
@@ -256,9 +278,12 @@ class CertificatesHandlerIO extends CertificatesHandler {
     final keyPair = generatePEMKeyPair();
     _storage.prepareKeyParent(filePrivateKey.parent);
     filePublicKey.parent.createSync(recursive: true);
-    if (FileSystemEntity.typeSync(filePublicKey.path, followLinks: false) ==
-        FileSystemEntityType.link) {
-      throw FileSystemException('Public key is a link', filePublicKey.path);
+    final publicType =
+        FileSystemEntity.typeSync(filePublicKey.path, followLinks: false);
+    if (publicType != FileSystemEntityType.notFound &&
+        publicType != FileSystemEntityType.file) {
+      throw FileSystemException(
+          'Public key destination is not a regular file', filePublicKey.path);
     }
     _storage.writeKey(filePrivateKey, keyPair.privateKeyPEM);
     filePublicKey.writeAsStringSync(keyPair.publicKeyPEM);
@@ -316,10 +341,14 @@ class CertificatesHandlerIO extends CertificatesHandler {
     final filePrivateKey = fileDomainFullChainPEM(cn);
 
     filePrivateKey.parent.createSync(recursive: true);
-    if (FileSystemEntity.typeSync(filePrivateKey.path, followLinks: false) ==
-        FileSystemEntityType.link) {
+    final chainType =
+        FileSystemEntity.typeSync(filePrivateKey.path, followLinks: false);
+    if (chainType != FileSystemEntityType.notFound &&
+        chainType != FileSystemEntityType.file) {
       throw FileSystemException(
-          'Certificate chain is a link', filePrivateKey.path);
+          'Certificate chain destination is not a '
+          'regular file',
+          filePrivateKey.path);
     }
     filePrivateKey.writeAsStringSync(fullChainPEM);
 
