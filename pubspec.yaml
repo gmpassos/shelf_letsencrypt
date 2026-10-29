@@ -13,7 +13,6 @@ dependencies:
   ffi: ^2.1.2
   multi_domain_secure_server: ^1.0.16
   path: ^1.9.1
-  posix: ^6.5.3
   shelf: ^1.4.2
 
 dev_dependencies:

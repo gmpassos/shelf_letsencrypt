@@ -1,13 +1,25 @@
-## Unreleased security patch
-
-- Store and migrate owner-only private keys on Linux. The built-in IO storage
-  handler now fails closed on other platforms pending dedicated ACL backends.
-
 ## 2.0.4
 
 - Security: validate certificate domain names before building filesystem paths
   (GHSA-j4rv-3cg2-g9xc). A domain such as `../outside` could previously read or
   write keys and certificates outside the certificates directory.
+
+- Security: store private keys owner-only (GHSA-vpwj-w7xm-f2p4). On Linux,
+  Android, macOS and iOS, `CertificatesHandlerIO` creates certificate
+  directories as `0700` and keys as `0600`, and tightens existing ones. Keys
+  that may already have been read by another user should be rotated.
+  - Construction fails if the storage directory is owned by another user, if an
+    ancestor is writable by group or others (unless sticky, like `/tmp`), or if
+    a symbolic link in the path is owned by neither root nor the service user.
+  - Loading a key fails if it is a symbolic link, has another owner or has
+    extra hard links.
+  - The storage directory and configured PEM paths cannot contain `..`.
+  - `directory` is now the absolute storage path with symbolic links resolved.
+  - Generating a key pair throws `StateError` if only one of the two key files
+    exists, or if they do not match, instead of returning the account key pair.
+  - Windows is unchanged: keys inherit the storage directory's ACLs.
+  - Linux requires `statx` (glibc 2.28+, musl 1.2.5+ or Android API 30+).
+  - ffi: ^2.1.2
 
 - `Domain.isValidName`:
   - Accepts any number of labels (e.g. `api.dev.example.com`), with the DNS

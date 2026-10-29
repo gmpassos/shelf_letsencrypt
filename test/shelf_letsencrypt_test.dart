@@ -4,7 +4,6 @@ import 'dart:io';
 
 import 'package:basic_utils/basic_utils.dart' hide Domain;
 import 'package:path/path.dart' as pack_path;
-import 'package:posix/posix.dart' as posix;
 import 'package:shelf/shelf.dart';
 import 'package:shelf_letsencrypt/shelf_letsencrypt.dart';
 import 'package:test/test.dart';
@@ -14,7 +13,7 @@ void main() {
     late Directory tmpDir;
     setUp(() {
       tmpDir = Directory.systemTemp.createTempSync('dart-test-1-tmp-');
-      posix.chmod(tmpDir.path, '700');
+      _chmod(tmpDir.path, '700');
       print('TMP DIR: $tmpDir');
     });
 
@@ -54,7 +53,6 @@ void main() {
     });
 
     test('private keys and certificate directories are private', () async {
-      if (Platform.isWindows) return;
       final handler = CertificatesHandlerIO(
           Directory(pack_path.join(tmpDir.path, 'private-certs')));
       await handler.generateAccountPEMKeyPair();
@@ -73,7 +71,7 @@ void main() {
                   .mode &
               0x3f,
           0);
-    });
+    }, skip: _posixSkip);
 
     test('existing permissive keys are secured without changing identity',
         () async {
@@ -84,12 +82,11 @@ void main() {
       final accountPem = account!.privateKeyPEM;
       final domainPem = domain!.privateKeyPEM;
 
-      posix.chmod(first.fileAccountPrivateKeyPEM().path, '644');
-      posix.chmod(first.fileDomainPrivateKeyPEM('example.com').path, '644');
-      posix.chmod(first.fileAccountPrivateKeyPEM().parent.path, '755');
-      posix.chmod(
-          first.fileDomainPrivateKeyPEM('example.com').parent.path, '755');
-      posix.chmod(root.path, '755');
+      _chmod(first.fileAccountPrivateKeyPEM().path, '644');
+      _chmod(first.fileDomainPrivateKeyPEM('example.com').path, '644');
+      _chmod(first.fileAccountPrivateKeyPEM().parent.path, '755');
+      _chmod(first.fileDomainPrivateKeyPEM('example.com').parent.path, '755');
+      _chmod(root.path, '755');
 
       final migrated = CertificatesHandlerIO(root);
       expect(
@@ -102,7 +99,7 @@ void main() {
           migrated.fileDomainPrivateKeyPEM('example.com').statSync().mode &
               0x3f,
           0);
-    });
+    }, skip: _posixSkip);
 
     test('private-key links and incomplete pairs fail closed', () async {
       final handler = CertificatesHandlerIO(
@@ -125,7 +122,7 @@ void main() {
       expect(() => handler.loadDomainPrivateKeyPEM('example.com'),
           throwsA(isA<FileSystemException>()));
       expect(outside.readAsStringSync(), 'sentinel');
-    });
+    }, skip: _posixSkip);
 
     test('nested configured key and public paths still work', () async {
       final handler = CertificatesHandlerIO(
@@ -138,7 +135,7 @@ void main() {
       expect(handler.fileAccountPublicKeyPEM().existsSync(), isTrue);
       expect(
           handler.fileAccountPrivateKeyPEM().parent.statSync().mode & 0x3f, 0);
-    });
+    }, skip: _posixSkip);
 
     test('invalid public destination fails before private-key creation',
         () async {
@@ -161,7 +158,7 @@ void main() {
         ..createSync();
       final actual = Directory(pack_path.join(elsewhere.path, 'store'))
         ..createSync();
-      posix.chmod(actual.path, '755');
+      _chmod(actual.path, '755');
       Link(pack_path.join(safe.path, 'link')).createSync(child.path);
 
       expect(
@@ -176,7 +173,39 @@ void main() {
               Directory(pack_path.join(tmpDir.path, 'configured-paths')),
               privateKeyPEMFileName: 'link/../privkey.pem'),
           throwsArgumentError);
-    });
+    }, skip: _posixSkip);
+
+    test('symbolic links in the storage path are resolved', () {
+      final real = Directory(pack_path.join(tmpDir.path, 'real'))..createSync();
+      _chmod(real.path, '755');
+      final alias = Link(pack_path.join(tmpDir.path, 'alias'))
+        ..createSync(real.path);
+
+      final handler =
+          CertificatesHandlerIO(Directory(pack_path.join(alias.path, 'certs')));
+
+      expect(
+          handler.directory.path,
+          equals(Directory(pack_path.join(real.path, 'certs'))
+              .resolveSymbolicLinksSync()));
+      expect(handler.fileAccountPrivateKeyPEM().path,
+          startsWith(handler.directory.path));
+    }, skip: _posixSkip);
+
+    test('storage under a directory writable by others is rejected', () {
+      final shared = Directory(pack_path.join(tmpDir.path, 'shared'))
+        ..createSync();
+      final certs = Directory(pack_path.join(shared.path, 'certs'));
+
+      _chmod(shared.path, '777');
+      expect(() => CertificatesHandlerIO(certs),
+          throwsA(isA<FileSystemException>()));
+      expect(certs.existsSync(), isFalse);
+
+      // A sticky shared parent, like /tmp, is accepted:
+      _chmod(shared.path, '1777');
+      expect(CertificatesHandlerIO(certs).directory.existsSync(), isTrue);
+    }, skip: _posixSkip);
 
     test('domain names cannot escape certificate storage', () async {
       final handler = CertificatesHandlerIO(
@@ -263,7 +292,7 @@ void main() {
     late Directory tmpDir;
     setUp(() {
       tmpDir = Directory.systemTemp.createTempSync('dart-test-1-tmp-');
-      posix.chmod(tmpDir.path, '700');
+      _chmod(tmpDir.path, '700');
       print('TMP DIR: $tmpDir');
     });
 
@@ -479,6 +508,17 @@ Future<void> _storeSelfSignedCertificate(
   final certificate =
       X509Utils.generateSelfSignedCertificate(keyPair.privateKey, csr, 30);
   await handler.saveSignedCertificateChain(cn, [certificate]);
+}
+
+/// Owner-only POSIX permissions are not enforced on Windows.
+final _posixSkip = Platform.isWindows ? 'POSIX permissions' : null;
+
+void _chmod(String path, String mode) {
+  if (Platform.isWindows) return;
+  final result = Process.runSync('chmod', [mode, path]);
+  if (result.exitCode != 0) {
+    throw FileSystemException('chmod $mode failed: ${result.stderr}', path);
+  }
 }
 
 void _copyDirectory(Directory from, String toPath) {

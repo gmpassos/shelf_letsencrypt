@@ -17,8 +17,7 @@ class CertificatesHandlerIO extends CertificatesHandler {
       {super.accountDirectory,
       super.privateKeyPEMFileName,
       super.publicKeyPEMFileName,
-      super.fullChainPEMFileName})
-      : directory = _checkedStorageDirectory(directory) {
+      super.fullChainPEMFileName}) {
     for (final configuredPath in [
       accountDirectory,
       privateKeyPEMFileName,
@@ -30,7 +29,7 @@ class CertificatesHandlerIO extends CertificatesHandler {
             'Certificate paths cannot contain parent components');
       }
     }
-    _storage = PrivateKeyStorage(this.directory);
+    _storage = PrivateKeyStorage(_checkedStorageDirectory(directory));
   }
 
   static Directory _checkedStorageDirectory(Directory directory) {
@@ -43,8 +42,9 @@ class CertificatesHandlerIO extends CertificatesHandler {
     return Directory(pack_path.normalize(absolutePath));
   }
 
-  /// The [Directory] to storage certificates.
-  final Directory directory;
+  /// The [Directory] to storage certificates, as an absolute path with
+  /// symbolic links resolved (except on Windows).
+  Directory get directory => _storage.root;
   late final PrivateKeyStorage _storage;
 
   @override
