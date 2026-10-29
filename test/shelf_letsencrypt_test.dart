@@ -65,6 +65,13 @@ void main() {
             handler.generateDomainPEMKeyPair(invalid), throwsArgumentError);
         await expectLater(handler.saveSignedCertificateChain(invalid, ['test']),
             throwsArgumentError);
+        expect(() => handler.isHandledDomainCertificate(invalid),
+            throwsArgumentError);
+        await expectLater(
+            handler.buildSecurityContexts(
+                [Domain(name: invalid, email: 'contact@example.com')],
+                allowUnresolvedDomain: true),
+            throwsArgumentError);
       }
       expect(Directory(pack_path.join(tmpDir.path, 'outside')).existsSync(),
           isFalse);
@@ -79,6 +86,45 @@ void main() {
         expect(key, isNotNull);
         expect(handler.fileDomainPrivateKeyPEM(name).existsSync(), isTrue);
       }
+    });
+
+    test('handled-domain discovery skips non-domain directories', () async {
+      final certsDir =
+          Directory(pack_path.join(tmpDir.path, 'discovery-certs'));
+      final handler = CertificatesHandlerIO(certsDir);
+
+      await _storeSelfSignedCertificate(handler, 'example.com');
+      expect(handler.listAllHandledDomains(), equals(['example.com']));
+
+      // Complete certificates stored under names that are not valid domains:
+      final domainDir = Directory(pack_path.join(certsDir.path, 'example.com'));
+      for (final name in [
+        '.hidden.com',
+        'not_a_domain',
+        '-bad.example.com',
+        'localhost',
+      ]) {
+        _copyDirectory(domainDir, pack_path.join(certsDir.path, name));
+      }
+
+      expect(handler.listAllHandledDomains(), equals(['example.com']));
+
+      final securityContexts = await handler.buildSecurityContexts(
+          [const Domain(name: 'example.com', email: 'contact@example.com')]);
+      expect(securityContexts, isNotNull);
+      expect(securityContexts, isNotEmpty);
+    });
+
+    test('handled-domain discovery supports nested PEM file names', () async {
+      final handler = CertificatesHandlerIO(
+          Directory(pack_path.join(tmpDir.path, 'nested-pem-certs')),
+          privateKeyPEMFileName: pack_path.join('live', 'privkey.pem'),
+          publicKeyPEMFileName: pack_path.join('live', 'pubkey.pem'),
+          fullChainPEMFileName: pack_path.join('live', 'fullchain.pem'));
+
+      await _storeSelfSignedCertificate(handler, 'example.com');
+
+      expect(handler.listAllHandledDomains(), equals(['example.com']));
     });
 
     tearDown(() {
@@ -249,4 +295,69 @@ void main() {
       tmpDir.deleteSync(recursive: true);
     });
   });
+
+  group('Domain', () {
+    test('isValidName', () {
+      final label63 = 'a' * 63;
+
+      for (final name in [
+        'example.com',
+        'EXAMPLE.COM',
+        'a-b.example.com',
+        'api.dev.example.com',
+        'www.example.co.uk',
+        'xn--bcher-kva.example',
+        '123.example.com',
+        'example.xn--p1ai',
+        '$label63.com',
+      ]) {
+        expect(Domain(name: name, email: '').isValidName, isTrue, reason: name);
+      }
+
+      for (final name in [
+        '',
+        'localhost',
+        'example.com.',
+        '.example.com',
+        'a..com',
+        '-a.com',
+        'a-.com',
+        '*.example.com',
+        'exa mple.com',
+        'example.com\n',
+        'a_b.example.com',
+        '1.2.3.4',
+        '127.0.0.1',
+        'example.123',
+        '../outside',
+        'a/b.com',
+        r'a\b.com',
+        'c:.com',
+        '${'a' * 64}.com',
+        // 255 chars, over the 253 limit:
+        List.filled(4, label63).join('.'),
+      ]) {
+        expect(Domain(name: name, email: '').isValidName, isFalse,
+            reason: name);
+      }
+    });
+  });
+}
+
+Future<void> _storeSelfSignedCertificate(
+    CertificatesHandlerIO handler, String cn) async {
+  final keyPair = await handler.ensureDomainPEMKeyPair(cn);
+  final csr = (await handler.generateCSR(cn, 'contact@$cn'))!;
+  final certificate =
+      X509Utils.generateSelfSignedCertificate(keyPair.privateKey, csr, 30);
+  await handler.saveSignedCertificateChain(cn, [certificate]);
+}
+
+void _copyDirectory(Directory from, String toPath) {
+  for (final file in from.listSync(recursive: true).whereType<File>()) {
+    final target = File(
+        pack_path.join(toPath, pack_path.relative(file.path, from: from.path)));
+    target.parent.createSync(recursive: true);
+    file.copySync(target.path);
+  }
 }

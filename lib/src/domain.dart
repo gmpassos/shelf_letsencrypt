@@ -44,8 +44,10 @@ class Domain {
   const Domain({required this.name, required this.email});
 
   /// ASCII DNS labels are safe as individual certificate directory names.
+  /// The top-level label must contain a letter, which rejects IP addresses
+  /// such as `1.2.3.4`.
   static final regexpDomainName = RegExp(
-      r'^(?=.{1,253}$)(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$');
+      r'^(?=.{1,253}$)(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+(?=[A-Za-z0-9-]*[A-Za-z])[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$');
 
   bool get isValidName => regexpDomainName.hasMatch(name);
 
