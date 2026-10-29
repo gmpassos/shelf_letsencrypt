@@ -227,6 +227,87 @@ void main() {
           throwsA(isA<FileSystemException>()));
     });
 
+    test('certificate chain recreates a removed storage root', () async {
+      final handler = handlerAt('removed-chain-root');
+      handler.directory.deleteSync(recursive: true);
+
+      await handler.saveSignedCertificateChain('a.example.com', ['chain']);
+      expect(
+          handler.fileDomainFullChainPEM('a.example.com').existsSync(), isTrue);
+    });
+
+    test('certificate chain rejects a linked domain directory', () async {
+      final handler = handlerAt('linked-chain-parent');
+      final outside = Directory(pack_path.join(tmpDir.path, 'outside-chain'))
+        ..createSync();
+      final victim = File(pack_path.join(outside.path, 'fullchain.pem'))
+        ..writeAsStringSync('sentinel');
+      Link(pack_path.join(handler.directory.path, 'a.example.com'))
+          .createSync(outside.path);
+
+      await expectLater(
+          handler.saveSignedCertificateChain('a.example.com', ['replacement']),
+          throwsA(isA<FileSystemException>()));
+      expect(victim.readAsStringSync(), 'sentinel');
+    }, skip: _posixSkip);
+
+    test('certificate chain rejects a linked nested parent', () async {
+      final root =
+          Directory(pack_path.join(tmpDir.path, 'linked-chain-nested'));
+      final handler = CertificatesHandlerIO(root,
+          fullChainPEMFileName: 'nested/fullchain.pem');
+      final domain = Directory(pack_path.join(root.path, 'a.example.com'))
+        ..createSync();
+      final outside = Directory(pack_path.join(tmpDir.path, 'outside-nested'))
+        ..createSync();
+      final victim = File(pack_path.join(outside.path, 'fullchain.pem'))
+        ..writeAsStringSync('sentinel');
+      Link(pack_path.join(domain.path, 'nested')).createSync(outside.path);
+
+      await expectLater(
+          handler.saveSignedCertificateChain('a.example.com', ['replacement']),
+          throwsA(isA<FileSystemException>()));
+      expect(victim.readAsStringSync(), 'sentinel');
+    }, skip: _posixSkip);
+
+    test('public key rejects a linked nested parent', () async {
+      final root =
+          Directory(pack_path.join(tmpDir.path, 'linked-public-parent'));
+      final handler = CertificatesHandlerIO(root,
+          publicKeyPEMFileName: 'nested/pubkey.pem');
+      final domain = Directory(pack_path.join(root.path, 'a.example.com'))
+        ..createSync();
+      final outside = Directory(pack_path.join(tmpDir.path, 'outside-public'))
+        ..createSync();
+      final victim = File(pack_path.join(outside.path, 'pubkey.pem'))
+        ..writeAsStringSync('sentinel');
+      Link(pack_path.join(domain.path, 'nested')).createSync(outside.path);
+
+      await expectLater(
+          handler.generateDomainPEMKeyPair('a.example.com', force: true),
+          throwsA(isA<FileSystemException>()));
+      expect(victim.readAsStringSync(), 'sentinel');
+    }, skip: _posixSkip);
+
+    test('external public and chain paths retain their permissions', () async {
+      final publicDir = Directory(pack_path.join(tmpDir.path, 'public'))
+        ..createSync();
+      Process.runSync('chmod', ['755', publicDir.path]);
+      final publicFile = File(pack_path.join(publicDir.path, 'pubkey.pem'));
+      final chainFile =
+          File(pack_path.join(tmpDir.path, 'new-chain', 'chain.pem'));
+      final handler = CertificatesHandlerIO(
+          Directory(pack_path.join(tmpDir.path, 'external-public')),
+          publicKeyPEMFileName: publicFile.path,
+          fullChainPEMFileName: chainFile.path);
+
+      await handler.generateDomainPEMKeyPair('a.example.com');
+      await handler.saveSignedCertificateChain('a.example.com', ['chain']);
+      expect(publicFile.existsSync(), isTrue);
+      expect(chainFile.existsSync(), isTrue);
+      expect(publicDir.statSync().mode & 0x1ff, 0x1ed);
+    }, skip: _posixSkip);
+
     test('toString', () {
       final handler = handlerAt('to-string');
       expect('$handler', contains(handler.directory.path));

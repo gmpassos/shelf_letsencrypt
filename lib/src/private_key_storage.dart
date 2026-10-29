@@ -27,7 +27,7 @@ final class PrivateKeyStorage {
     final path = p.normalize(root.absolute.path);
     if (_posix == null) {
       Directory(path).createSync(recursive: true);
-      _rootPath = path;
+      _rootPath = p.normalize(Directory(path).resolveSymbolicLinksSync());
     } else {
       _rootPath = _prepareRoot(path);
     }
@@ -182,6 +182,56 @@ final class PrivateKeyStorage {
       parent.createSync(recursive: true);
     } else {
       _preparePrivateParent(parent);
+    }
+  }
+
+  /// Prepares a parent for public keys or certificate chains. Managed paths
+  /// cannot pass through a link left in an older certificate store. Configured
+  /// external paths remain the operator's responsibility and retain their
+  /// existing creation and permission behavior.
+  void preparePublicParent(Directory parent) {
+    final parentPath = p.normalize(parent.absolute.path);
+    if (parentPath != _rootPath && !p.isWithin(_rootPath, parentPath)) {
+      parent.createSync(recursive: true);
+      return;
+    }
+
+    if (_posix == null) {
+      if (FileSystemEntity.typeSync(_rootPath, followLinks: false) ==
+          FileSystemEntityType.notFound) {
+        Directory(_rootPath).createSync(recursive: true);
+      }
+      if (FileSystemEntity.typeSync(_rootPath, followLinks: false) !=
+          FileSystemEntityType.directory) {
+        throw FileSystemException('Storage root is not a directory', _rootPath);
+      }
+    } else {
+      _secureRoot();
+    }
+
+    var current = _rootPath;
+    final relative = p.relative(parentPath, from: _rootPath);
+    if (relative == '.') return;
+    for (final component in p.split(relative)) {
+      current = p.join(current, component);
+      final type = FileSystemEntity.typeSync(current, followLinks: false);
+      if (type == FileSystemEntityType.notFound) {
+        if (_posix == null) {
+          Directory(current).createSync();
+        } else {
+          _posix.mkdir(current, _ownerOnlyDirectory);
+        }
+      } else if (type != FileSystemEntityType.directory) {
+        throw FileSystemException(
+            'Certificate parent is not a directory', current);
+      }
+      if (_posix != null) {
+        final status = _posix.lstat(current);
+        if (!status.isDirectory || status.uid != _posix.euid) {
+          throw FileSystemException(
+              'Certificate parent has an unsafe owner or type', current);
+        }
+      }
     }
   }
 

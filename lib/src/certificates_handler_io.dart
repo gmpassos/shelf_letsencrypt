@@ -276,7 +276,7 @@ class CertificatesHandlerIO extends CertificatesHandler {
 
     final keyPair = generatePEMKeyPair();
     _storage.prepareKeyParent(filePrivateKey.parent);
-    filePublicKey.parent.createSync(recursive: true);
+    _storage.preparePublicParent(filePublicKey.parent);
     final publicType =
         FileSystemEntity.typeSync(filePublicKey.path, followLinks: false);
     if (publicType != FileSystemEntityType.notFound &&
@@ -339,7 +339,7 @@ class CertificatesHandlerIO extends CertificatesHandler {
 
     final filePrivateKey = fileDomainFullChainPEM(cn);
 
-    filePrivateKey.parent.createSync(recursive: true);
+    _storage.preparePublicParent(filePrivateKey.parent);
     final chainType =
         FileSystemEntity.typeSync(filePrivateKey.path, followLinks: false);
     if (chainType != FileSystemEntityType.notFound &&
