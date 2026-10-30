@@ -1,19 +1,24 @@
 name: shelf_letsencrypt
-version: 2.0.5
+version: 2.0.6
 homepage: https://github.com/gmpassos/shelf_letsencrypt
 description: Let's Encrypt support for the shelf package (free and automatic HTTPS certificate support).
 
 environment:
   sdk: '>=3.5.0 <4.0.0'
 
+executables:
+  shelf_letsencrypt:
+
 dependencies:
   acme_client: ^1.3.0
+  args: ^2.6.0
   basic_utils: ^5.8.2
   collection: ^1.19.0
   ffi: ^2.1.2
   multi_domain_secure_server: ^1.0.16
   path: ^1.9.1
   shelf: ^1.4.2
+  shelf_static: ^1.1.3
 
 dev_dependencies:
   cron: ^0.5.1

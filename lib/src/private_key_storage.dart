@@ -23,9 +23,15 @@ const _ownerOnlyFile = 0x180;
 /// This does not defend against another process running as the same user or a
 /// process that can replace a trusted ancestor while the service is running.
 final class PrivateKeyStorage {
-  PrivateKeyStorage(Directory root) : _posix = _Posix.current() {
+  PrivateKeyStorage(Directory root, {this.readOnly = false})
+      : _posix = _Posix.current() {
     final path = p.normalize(root.absolute.path);
     if (_posix == null) {
+      if (readOnly && !Directory(path).existsSync()) {
+        changes.add('Create $path');
+        _rootPath = path;
+        return;
+      }
       Directory(path).createSync(recursive: true);
       _rootPath = p.normalize(Directory(path).resolveSymbolicLinksSync());
     } else {
@@ -34,6 +40,18 @@ final class PrivateKeyStorage {
   }
 
   final _Posix? _posix;
+
+  /// With [readOnly], the same checks run and throw, but nothing is created,
+  /// written or changed: the changes that would be made are recorded in
+  /// [changes] instead, and writing a key throws [StateError].
+  final bool readOnly;
+
+  /// The changes skipped in [readOnly] mode, in the order they were found.
+  final Set<String> changes = {};
+
+  void _checkWritable() {
+    if (readOnly) throw StateError('Certificate storage is read-only');
+  }
 
   /// The storage root with symbolic links resolved. Permission checks and file
   /// operations both use this path.
@@ -62,6 +80,11 @@ final class PrivateKeyStorage {
     if (expected != null &&
         p.joinAll([current, ...missing.reversed]) != expected) {
       throw FileSystemException('Storage root has moved', expected);
+    }
+    if (readOnly && missing.isNotEmpty) {
+      final created = p.joinAll([current, ...missing.reversed]);
+      changes.add('Create $created (0700)');
+      return created;
     }
     for (final component in missing.reversed) {
       current = p.join(current, component);
@@ -140,6 +163,10 @@ final class PrivateKeyStorage {
           'Certificate directory has a different owner', path);
     }
     if (status.permissions != _ownerOnlyDirectory) {
+      if (readOnly) {
+        changes.add('Set $path to 0700');
+        return;
+      }
       posix.chmod(path, _ownerOnlyDirectory);
     }
     final secured = posix.lstat(path);
@@ -163,6 +190,10 @@ final class PrivateKeyStorage {
         current = p.join(current, component);
         if (FileSystemEntity.typeSync(current, followLinks: false) ==
             FileSystemEntityType.notFound) {
+          if (readOnly) {
+            changes.add('Create $current (0700)');
+            return;
+          }
           posix.mkdir(current, _ownerOnlyDirectory);
         }
         _secureOwnedDirectory(current);
@@ -182,6 +213,7 @@ final class PrivateKeyStorage {
   }
 
   void prepareKeyParent(Directory parent) {
+    _checkWritable();
     if (_posix == null) {
       parent.createSync(recursive: true);
     } else {
@@ -195,6 +227,7 @@ final class PrivateKeyStorage {
   /// existing creation and permission behavior.
   /// Returns whether [parent] is managed, i.e. the root or inside it.
   bool _preparePublicParent(Directory parent) {
+    _checkWritable();
     final parentPath = p.normalize(parent.absolute.path);
     if (!_isManaged(parentPath)) {
       parent.createSync(recursive: true);
@@ -295,6 +328,10 @@ final class PrivateKeyStorage {
           'Private key has unsafe owner, type or link count', file.path);
     }
     if (status.permissions != _ownerOnlyFile) {
+      if (readOnly) {
+        changes.add('Set ${file.path} to 0600');
+        return;
+      }
       posix.chmod(file.path, _ownerOnlyFile);
     }
     final secured = posix.lstat(file.path);
@@ -307,6 +344,7 @@ final class PrivateKeyStorage {
   }
 
   void writeKey(File target, String pem) {
+    _checkWritable();
     if (_posix == null) {
       target.parent.createSync(recursive: true);
       target.writeAsStringSync(pem, flush: true);

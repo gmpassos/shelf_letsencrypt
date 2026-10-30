@@ -357,6 +357,50 @@ void main() {
   });
 
   group('private-key storage', () {
+    test('inspectStorage reports changes without making them', () async {
+      final missing =
+          Directory(pack_path.join(tmpDir.path, 'missing', 'certs'));
+      expect(CertificatesHandlerIO.inspectStorage(missing),
+          [allOf(startsWith('Create '), endsWith('certs (0700)'))]);
+      expect(missing.parent.existsSync(), isFalse);
+
+      final handler = handlerAt('inspect');
+      await storeSelfSignedCertificate(handler, 'a.example.com');
+      final key = handler.fileDomainPrivateKeyPEM('a.example.com');
+      Process.runSync('chmod', ['755', handler.directory.path]);
+      Process.runSync('chmod', ['644', key.path]);
+
+      expect(CertificatesHandlerIO.inspectStorage(handler.directory), [
+        'Set ${handler.directory.path} to 0700',
+        'Set ${key.path} to 0600',
+      ]);
+      expect(key.statSync().modeString(), 'rw-r--r--');
+      expect(handler.directory.statSync().modeString(), 'rwxr-xr-x');
+    }, skip: _posixSkip);
+
+    test('inspectStorage throws what a handler would reject', () async {
+      final handler = handlerAt('inspect-reject');
+      await handler.generateDomainPEMKeyPair('a.example.com');
+      hardLink(handler.fileDomainPrivateKeyPEM('a.example.com').path,
+          pack_path.join(tmpDir.path, 'copy.pem'));
+
+      expect(
+          () => CertificatesHandlerIO.inspectStorage(handler.directory),
+          throwsA(isA<FileSystemException>()
+              .having((e) => e.message, 'message', contains('link count'))));
+    }, skip: _posixSkip);
+
+    test('listDomains includes incomplete domains', () async {
+      final handler = handlerAt('list-domains');
+      await storeSelfSignedCertificate(handler, 'a.example.com');
+      await handler.ensureDomainPEMKeyPair('b.example.com');
+      Directory(pack_path.join(handler.directory.path, 'not-a-domain'))
+          .createSync();
+
+      expect(handler.listDomains()..sort(), ['a.example.com', 'b.example.com']);
+      expect(handler.listAllHandledDomains(), ['a.example.com']);
+    });
+
     test('re-creates a removed storage directory', () async {
       final handler = handlerAt('removed');
       handler.directory.deleteSync(recursive: true);

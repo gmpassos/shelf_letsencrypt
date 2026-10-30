@@ -18,6 +18,47 @@ class CertificatesHandlerIO extends CertificatesHandler {
       super.privateKeyPEMFileName,
       super.publicKeyPEMFileName,
       super.fullChainPEMFileName}) {
+    _storage = _openStorage(directory, readOnly: false);
+  }
+
+  CertificatesHandlerIO._readOnly(Directory directory,
+      {super.accountDirectory,
+      super.privateKeyPEMFileName,
+      super.publicKeyPEMFileName,
+      super.fullChainPEMFileName}) {
+    _storage = _openStorage(directory, readOnly: true);
+  }
+
+  /// Runs the checks that a handler for [directory] makes when it is created
+  /// and when it loads the account and domain keys, without creating or
+  /// changing anything.
+  ///
+  /// Throws [FileSystemException] for what a handler would reject. Returns the
+  /// changes a handler would make, such as creating the directory or setting
+  /// owner-only permissions on an older store.
+  static List<String> inspectStorage(Directory directory,
+      {String accountDirectory =
+          CertificatesHandler.defaultAccountDirectoryName,
+      String privateKeyPEMFileName =
+          CertificatesHandler.defaultPrivateKeyPEMFileName,
+      String publicKeyPEMFileName =
+          CertificatesHandler.defaultPublicKeyPEMFileName,
+      String fullChainPEMFileName =
+          CertificatesHandler.defaultFullChainPEMFileName}) {
+    final handler = CertificatesHandlerIO._readOnly(directory,
+        accountDirectory: accountDirectory,
+        privateKeyPEMFileName: privateKeyPEMFileName,
+        publicKeyPEMFileName: publicKeyPEMFileName,
+        fullChainPEMFileName: fullChainPEMFileName);
+    if (handler.directory.existsSync()) {
+      handler.loadAccountPrivateKeyPEM();
+      handler.listAllHandledDomains(checkSecurityContext: false);
+    }
+    return handler._storage.changes.toList();
+  }
+
+  PrivateKeyStorage _openStorage(Directory directory,
+      {required bool readOnly}) {
     for (final configuredPath in [
       accountDirectory,
       privateKeyPEMFileName,
@@ -29,7 +70,8 @@ class CertificatesHandlerIO extends CertificatesHandler {
             'Certificate paths cannot contain parent components');
       }
     }
-    _storage = PrivateKeyStorage(_checkedStorageDirectory(directory));
+    return PrivateKeyStorage(_checkedStorageDirectory(directory),
+        readOnly: readOnly);
   }
 
   static Directory _checkedStorageDirectory(Directory directory) {
@@ -49,16 +91,21 @@ class CertificatesHandlerIO extends CertificatesHandler {
 
   @override
   List<String> listAllHandledDomains({bool checkSecurityContext = true}) {
-    final domainsDirs = directory
-        .listSync()
-        .where(_isDomainDirectory)
-        .map((e) => _pathFileName(e.path))
+    final domainsDirs = listDomains()
         .where((e) => isHandledDomainCertificate(e,
             checkSecurityContext: checkSecurityContext))
         .toList();
 
     return domainsDirs;
   }
+
+  /// The domains with a directory in [directory], whether or not they have a
+  /// complete and valid certificate. See [listAllHandledDomains].
+  List<String> listDomains() => directory
+      .listSync()
+      .where(_isDomainDirectory)
+      .map((e) => _pathFileName(e.path))
+      .toList();
 
   bool _isDomainDirectory(FileSystemEntity e) {
     if (FileSystemEntity.typeSync(e.path, followLinks: false) !=
