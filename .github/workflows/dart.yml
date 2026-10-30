@@ -62,6 +62,8 @@ jobs:
           dart pub global activate coverage
           dart pub global run coverage:format_coverage --packages=.dart_tool/package_config.json --report-on=lib --lcov -o ./coverage/lcov.info -i ./coverage
       - name: Check coverage (>= 90%)
+        # Not on Windows: the POSIX permission tests are skipped there.
+        if: matrix.os != 'windows-latest'
         run: |
           awk -F: '/^LH:/{h+=$2} /^LF:/{l+=$2} END{p=100*h/l; printf "Line coverage: %.1f%%\n", p; if (p < 90) exit 1}' coverage/lcov.info
       - name: Upload coverage to Codecov
