@@ -43,7 +43,7 @@ class CertificatesHandlerIO extends CertificatesHandler {
   }
 
   /// The [Directory] to storage certificates, as an absolute path with
-  /// symbolic links resolved (except on Windows).
+  /// symbolic links resolved.
   Directory get directory => _storage.root;
   late final PrivateKeyStorage _storage;
 
@@ -276,16 +276,9 @@ class CertificatesHandlerIO extends CertificatesHandler {
 
     final keyPair = generatePEMKeyPair();
     _storage.prepareKeyParent(filePrivateKey.parent);
-    filePublicKey.parent.createSync(recursive: true);
-    final publicType =
-        FileSystemEntity.typeSync(filePublicKey.path, followLinks: false);
-    if (publicType != FileSystemEntityType.notFound &&
-        publicType != FileSystemEntityType.file) {
-      throw FileSystemException(
-          'Public key destination is not a regular file', filePublicKey.path);
-    }
+    _storage.preparePublicTarget(filePublicKey, 'Public key');
     _storage.writeKey(filePrivateKey, keyPair.privateKeyPEM);
-    filePublicKey.writeAsStringSync(keyPair.publicKeyPEM);
+    _storage.writePublic(filePublicKey, keyPair.publicKeyPEM, 'Public key');
 
     return keyPair;
   }
@@ -339,17 +332,7 @@ class CertificatesHandlerIO extends CertificatesHandler {
 
     final filePrivateKey = fileDomainFullChainPEM(cn);
 
-    filePrivateKey.parent.createSync(recursive: true);
-    final chainType =
-        FileSystemEntity.typeSync(filePrivateKey.path, followLinks: false);
-    if (chainType != FileSystemEntityType.notFound &&
-        chainType != FileSystemEntityType.file) {
-      throw FileSystemException(
-          'Certificate chain destination is not a '
-          'regular file',
-          filePrivateKey.path);
-    }
-    filePrivateKey.writeAsStringSync(fullChainPEM);
+    _storage.writePublic(filePrivateKey, fullChainPEM, 'Certificate chain');
 
     return true;
   }
