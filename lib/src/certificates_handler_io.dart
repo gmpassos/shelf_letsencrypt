@@ -21,7 +21,10 @@ class CertificatesHandlerIO extends CertificatesHandler {
     _storage = _openStorage(directory, readOnly: false);
   }
 
-  CertificatesHandlerIO._readOnly(Directory directory,
+  /// Opens [directory] without creating or changing anything, to inspect it.
+  /// The storage checks still run and throw, but generating keys and saving
+  /// certificates throw [StateError], and [directory] may not exist.
+  CertificatesHandlerIO.readOnly(Directory directory,
       {super.accountDirectory,
       super.privateKeyPEMFileName,
       super.publicKeyPEMFileName,
@@ -45,7 +48,7 @@ class CertificatesHandlerIO extends CertificatesHandler {
           CertificatesHandler.defaultPublicKeyPEMFileName,
       String fullChainPEMFileName =
           CertificatesHandler.defaultFullChainPEMFileName}) {
-    final handler = CertificatesHandlerIO._readOnly(directory,
+    final handler = CertificatesHandlerIO.readOnly(directory,
         accountDirectory: accountDirectory,
         privateKeyPEMFileName: privateKeyPEMFileName,
         publicKeyPEMFileName: publicKeyPEMFileName,
@@ -101,11 +104,15 @@ class CertificatesHandlerIO extends CertificatesHandler {
 
   /// The domains with a directory in [directory], whether or not they have a
   /// complete and valid certificate. See [listAllHandledDomains].
-  List<String> listDomains() => directory
-      .listSync()
-      .where(_isDomainDirectory)
-      .map((e) => _pathFileName(e.path))
-      .toList();
+  List<String> listDomains() {
+    // Only a read-only handler can have a missing directory.
+    if (!directory.existsSync()) return [];
+    return directory
+        .listSync()
+        .where(_isDomainDirectory)
+        .map((e) => _pathFileName(e.path))
+        .toList();
+  }
 
   bool _isDomainDirectory(FileSystemEntity e) {
     if (FileSystemEntity.typeSync(e.path, followLinks: false) !=

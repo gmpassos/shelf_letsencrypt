@@ -378,6 +378,29 @@ void main() {
       expect(handler.directory.statSync().modeString(), 'rwxr-xr-x');
     }, skip: _posixSkip);
 
+    test('a read-only handler reads but never writes', () async {
+      final missing = handlerAt('read-only-source').directory;
+      missing.deleteSync();
+      final empty = CertificatesHandlerIO.readOnly(missing);
+      expect(empty.listDomains(), isEmpty);
+      expect(missing.existsSync(), isFalse);
+
+      final source = handlerAt('read-only');
+      await storeSelfSignedCertificate(source, 'a.example.com');
+      final handler = CertificatesHandlerIO.readOnly(source.directory);
+      expect(handler.listAllHandledDomains(), ['a.example.com']);
+      expect(await handler.getDomainPEMKeyPair('a.example.com'), isNotNull);
+      await expectLater(
+          handler.generateDomainPEMKeyPair('b.example.com'), throwsStateError);
+      await expectLater(
+          handler.saveSignedCertificateChain('a.example.com', ['chain']),
+          throwsStateError);
+      expect(
+          Directory(pack_path.join(source.directory.path, 'b.example.com'))
+              .existsSync(),
+          isFalse);
+    });
+
     test('inspectStorage throws what a handler would reject', () async {
       final handler = handlerAt('inspect-reject');
       await handler.generateDomainPEMKeyPair('a.example.com');

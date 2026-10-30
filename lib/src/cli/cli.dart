@@ -89,7 +89,8 @@ class ShelfLetsEncryptCli {
     } on UsageException catch (e) {
       err.writeln(e);
       return 64;
-    } on FileSystemException catch (e) {
+    } catch (e) {
+      // Storage, network and ACME errors: a message, not a stack trace.
       err.writeln('FAIL  ${describeError(e)}');
       return 1;
     }
@@ -163,11 +164,17 @@ abstract class CliCommand extends Command<int> {
   bool get json => globalResults!.flag('json');
   bool get verbose => globalResults!.flag('verbose');
 
-  /// The certificates directory from `--dir` or the environment.
-  String get directoryPath {
+  /// The certificates directory from `--dir` or the environment, if given.
+  String? get optionalDirectoryPath {
     final dir = globalResults!.option('dir') ??
         Platform.environment[ShelfLetsEncryptCli.dirEnvironmentVariable];
-    if (dir == null || dir.isEmpty) {
+    return dir == null || dir.isEmpty ? null : dir;
+  }
+
+  /// The certificates directory from `--dir` or the environment.
+  String get directoryPath {
+    final dir = optionalDirectoryPath;
+    if (dir == null) {
       usageException('Missing --dir '
           '(or \$${ShelfLetsEncryptCli.dirEnvironmentVariable}).');
     }
@@ -183,6 +190,15 @@ abstract class CliCommand extends Command<int> {
   /// missing and an older store is set to owner-only permissions.
   CertificatesHandlerIO openHandler() =>
       CertificatesHandlerIO(Directory(directoryPath),
+          accountDirectory: _accountDirectory,
+          privateKeyPEMFileName: _privateKeyFile,
+          publicKeyPEMFileName: _publicKeyFile,
+          fullChainPEMFileName: _fullChainFile);
+
+  /// Opens the certificates directory without changing it, for the commands
+  /// that only read. See [CertificatesHandlerIO.readOnly].
+  CertificatesHandlerIO openReadOnlyHandler([String? path]) =>
+      CertificatesHandlerIO.readOnly(Directory(path ?? directoryPath),
           accountDirectory: _accountDirectory,
           privateKeyPEMFileName: _privateKeyFile,
           publicKeyPEMFileName: _publicKeyFile,

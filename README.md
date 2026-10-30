@@ -292,8 +292,10 @@ shelf_letsencrypt --dir /var/lib/myapp/certs list
 | `request <domain>... --email <e>` | Requests certificates for domains that have none or whose certificate expires within `--days`. Skips valid certificates unless `--force` is given. |
 | `renew [<domain>...] --email <e>` | Renews the certificates that expire within `--days` (all stored domains by default). `--dry-run` only lists them. `--pre-hook <command>` runs first when a certificate is due (e.g. to stop the server holding port 80), and `--post-hook <command>` afterwards (e.g. to start it again). |
 | `rotate-key <domain> --email <e>` | Generates a new private key and requests a certificate for it. The previous key and certificate are restored if the request fails. |
-| `verify <domain>...` | Connects to the live HTTPS server and checks that it serves the stored certificate, and that it is not close to expiry (`--days 5`). `--connect <address>` tests a specific server. |
-| `serve <domain>... --email <e>` | Runs an HTTPS server with automatic certificates and renewals, serving `--static <dir>` or an "OK" page. |
+| `verify <domain>...` | Connects to the live HTTPS server and checks that its certificate is not close to expiry (`--days 5`) and, with `--dir`, that it is the stored one. `--connect <address>` tests a specific server. |
+| `serve <domain>... --email <e>` | Runs an HTTPS server with automatic certificates and renewals, serving `--static <dir>` or an "OK" page. It restarts only for a renewed certificate that loads, and keeps serving the previous one otherwise. |
+
+`check`, `list`, `show` and `verify` never create or change files.
 
 Global options:
 

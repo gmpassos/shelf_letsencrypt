@@ -11,6 +11,8 @@ import '../letsencrypt.dart';
 import 'certificate_info.dart';
 import 'cli.dart';
 
+typedef _Servers = ({HttpServer http, HttpServer https});
+
 /// `verify`: checks the certificate a live server presents.
 class VerifyCommand extends CliCommand {
   VerifyCommand(super.cli) {
@@ -36,8 +38,9 @@ class VerifyCommand extends CliCommand {
 
   @override
   String get description =>
-      'Connects to the live HTTPS server of each domain and checks that it '
-      'serves the stored certificate, and that it is not close to expiry.';
+      'Connects to the live HTTPS server of each domain and checks that its '
+      'certificate is not close to expiry and, with --dir, that it is the '
+      'stored one.';
 
   @override
   String get invocation => '${runner!.executableName} $name <domain>...';
@@ -49,14 +52,17 @@ class VerifyCommand extends CliCommand {
     final days = intOption('days');
     final connect = argResults!.option('connect');
     final production = argResults!.flag('production');
-    final handler = openHandler();
+    // Without a directory, only the served certificate is checked.
+    final dir = optionalDirectoryPath;
+    final handler = dir == null ? null : openReadOnlyHandler(dir);
     final now = cli.clock();
 
     var failed = false;
     final results = <Map<String, Object?>>[];
     for (final domain in domains) {
-      final stored =
-          DomainCertificateStatus.read(handler, domain, renewDays: 0).info;
+      final stored = handler == null
+          ? null
+          : DomainCertificateStatus.read(handler, domain, renewDays: 0).info;
       final problems = <String>[];
       X509Certificate? served;
       try {
@@ -183,64 +189,112 @@ class ServeCommand extends AcmeCommand {
     final handler = openHandler();
     final letsEncrypt = createLetsEncrypt(handler, securePort: securePort);
 
-    var servers = await letsEncrypt.startServer(app, domains);
+    _Servers? servers = await letsEncrypt.startServer(app, domains);
     cli.out.writeln(
         'Serving ${names.map((e) => 'https://$e:$securePort/').join(' ')}'
         ' (HTTP on ${letsEncrypt.port})');
 
-    var renewing = false;
-    Future<void> renewDue() async {
-      if (renewing) return;
-      renewing = true;
-      try {
-        servers = await _renewDue(
-            letsEncrypt, handler, app, domains, servers, renewDays);
-      } finally {
-        renewing = false;
-      }
-    }
-
-    final timer = Timer.periodic(interval, (_) => renewDue());
+    Future<void>? renewal;
+    var stopping = false;
+    final timer = Timer.periodic(interval, (_) {
+      if (renewal != null || stopping) return;
+      renewal =
+          _renewDue(letsEncrypt, handler, app, domains, servers, renewDays)
+              .then((running) => servers = running)
+              .whenComplete(() => renewal = null);
+    });
     try {
       await cli.waitForShutdown();
     } finally {
+      stopping = true;
       timer.cancel();
-      await servers.http.close(force: true);
-      await servers.https.close(force: true);
+      // A renewal may be restarting the servers: close what it leaves.
+      await renewal;
+      await servers?.http.close(force: true);
+      await servers?.https.close(force: true);
     }
     cli.out.writeln('Stopped');
     return 0;
   }
 
   /// Renews the due certificates while the HTTP server answers the challenges,
-  /// then restarts the servers to load them.
-  Future<({HttpServer http, HttpServer https})> _renewDue(
+  /// then restarts the servers to load them. If a previous restart failed and
+  /// [servers] is `null`, starts them again instead. Never throws: returns the
+  /// running servers, or `null` if they could not be started.
+  Future<_Servers?> _renewDue(
       LetsEncrypt letsEncrypt,
       CertificatesHandlerIO handler,
       Handler app,
       List<Domain> domains,
-      ({HttpServer http, HttpServer https}) servers,
+      _Servers? servers,
+      int renewDays) async {
+    if (servers == null) {
+      // The servers are down, so the HTTP port is free for the challenges of
+      // the certificates that kept them from starting.
+      try {
+        final challenges = await serveChallenges(letsEncrypt);
+        try {
+          await _renewEach(letsEncrypt, handler, domains, renewDays);
+        } finally {
+          await challenges.close(force: true);
+        }
+      } catch (e) {
+        cli.err.writeln('FAIL  renewing: ${describeError(e)}');
+      }
+      return _start(letsEncrypt, app, domains);
+    }
+
+    if (!await _renewEach(letsEncrypt, handler, domains, renewDays)) {
+      return servers;
+    }
+    await servers.http.close(force: true);
+    await servers.https.close(force: true);
+    return _start(letsEncrypt, app, domains);
+  }
+
+  /// Renews the due certificates of [domains]. Returns whether one was renewed
+  /// and can be loaded, so that a restart is worth it: until then the running
+  /// server keeps the previous certificate.
+  Future<bool> _renewEach(
+      LetsEncrypt letsEncrypt,
+      CertificatesHandlerIO handler,
+      List<Domain> domains,
       int renewDays) async {
     var renewed = false;
     for (final domain in domains) {
-      final status = DomainCertificateStatus.read(handler, domain.name,
-          renewDays: renewDays);
-      if (!status.isDue) continue;
       try {
-        if (await letsEncrypt.requestCertificate(domain)) {
+        final status = DomainCertificateStatus.read(handler, domain.name,
+            renewDays: renewDays);
+        if (!status.isDue) continue;
+        if (!await letsEncrypt.requestCertificate(domain)) continue;
+        if (handler.isHandledDomainCertificate(domain.name)) {
           renewed = true;
           cli.out.writeln('renewed   ${domain.name}');
+        } else {
+          cli.err.writeln('FAIL  renewing ${domain.name}: the new '
+              "certificate can't be loaded (retrying at the next check)");
         }
       } catch (e) {
         cli.err.writeln('FAIL  renewing ${domain.name}: ${describeError(e)}');
       }
     }
-    if (!renewed) return servers;
+    return renewed;
+  }
 
-    await servers.http.close(force: true);
-    await servers.https.close(force: true);
-    return letsEncrypt.startServer(app, domains,
-        checkCertificate: false, requestCertificate: false);
+  /// Starts the servers with the stored certificates, without requesting
+  /// any: [_renewEach] already did.
+  Future<_Servers?> _start(
+      LetsEncrypt letsEncrypt, Handler app, List<Domain> domains) async {
+    try {
+      final servers = await letsEncrypt.startServer(app, domains,
+          checkCertificate: false, requestCertificate: false);
+      cli.out.writeln('restarted the server');
+      return servers;
+    } catch (e) {
+      cli.err.writeln('FAIL  starting the server: ${describeError(e)} '
+          '(retrying at the next check)');
+      return null;
+    }
   }
 
   Duration _duration(String value) {

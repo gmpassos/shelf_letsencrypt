@@ -9,14 +9,20 @@
     `--post-hook` for cron.
   - `rotate-key`: a new domain key and certificate, restoring the previous
     ones if the request fails.
-  - `verify`: checks that a live server serves the stored certificate.
-  - `serve`: an HTTPS server with automatic certificates and renewals.
+  - `verify`: checks the certificate a live server serves, and with `--dir`
+    that it is the stored one.
+  - `serve`: an HTTPS server with automatic certificates and renewals. It
+    restarts only for a renewed certificate that loads, and retries a failed
+    restart at the next check.
+  - `check`, `list`, `show` and `verify` never create or change files.
   - `--json` output, `--verbose` ACME log, and exit codes `0`/`1`/`64`.
   - Uses the staging API unless `--production` is given.
   - args: ^2.6.0
   - shelf_static: ^1.1.3
 
 - `CertificatesHandlerIO`:
+  - `CertificatesHandlerIO.readOnly`: opens a directory without creating or
+    changing anything. Storage checks still apply; writes throw `StateError`.
   - `inspectStorage`: runs the storage checks of the constructor and of key
     loading without creating or changing anything, and returns the changes a
     handler would make.

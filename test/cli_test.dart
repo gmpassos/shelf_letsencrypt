@@ -450,6 +450,21 @@ void main() {
       expect(result.out, contains('No domains'));
     });
 
+    test('list and show do not change the directory', () async {
+      expect((await run(['list'])).code, 0);
+      expect((await run(['show', _domain])).code, 1);
+      expect(Directory(certsDir).existsSync(), isFalse);
+
+      await storeSelfSignedCertificate(handler(), _domain);
+      final key = handler().fileDomainPrivateKeyPEM(_domain);
+      Process.runSync('chmod', ['755', certsDir]);
+      Process.runSync('chmod', ['644', key.path]);
+      expect((await run(['list'])).code, 0);
+      expect((await run(['show', _domain])).code, 0);
+      expect(key.statSync().modeString(), 'rw-r--r--');
+      expect(Directory(certsDir).statSync().modeString(), 'rwxr-xr-x');
+    }, skip: _posixSkip);
+
     test('show a certificate', () async {
       await request();
       final result = await run(['show', _domain]);
@@ -529,11 +544,23 @@ void main() {
       expect(result.code, 1);
       expect(result.out, contains('No key to rotate'));
     });
+
+    test('refuses to run after an interrupted rotation', () async {
+      await request();
+      final key = handler().fileDomainPrivateKeyPEM(_domain);
+      key.renameSync('${key.path}.previous');
+
+      final result = await run(['rotate-key', _domain, ...acmeOptions()]);
+      expect(result.code, 1);
+      expect(result.out, contains('A previous rotation was interrupted'));
+      expect(result.out, contains('${key.path}.previous'));
+      expect(acme.certificatesIssued, 1);
+    });
   });
 
   group('serve and verify', () {
     /// Starts `serve` and waits until it is listening.
-    Future<({Future<int> code, StringBuffer out})> startServe(
+    Future<({Future<int> code, StringBuffer out, StringBuffer err})> startServe(
         List<String> extra) async {
       final out = StringBuffer();
       final err = StringBuffer();
@@ -559,7 +586,7 @@ void main() {
         if (!shutdown.isCompleted) shutdown.complete();
         await code;
       });
-      return (code: code, out: out);
+      return (code: code, out: out, err: err);
     }
 
     Future<String> get(String path) async {
@@ -639,6 +666,68 @@ void main() {
       final result = await verify();
       expect(result.code, 0);
       expect(result.out, contains('no stored certificate'));
+    });
+
+    test('verify without --dir checks only the served certificate', () async {
+      await startServe([]);
+      final result = await run([
+        'verify',
+        _domain,
+        '--connect',
+        '127.0.0.1',
+        '--port',
+        '$securePort'
+      ], withDir: false);
+      expect(result.code, 0, reason: result.err);
+      expect(result.out, contains('no stored certificate'));
+    });
+
+    test('serve fails cleanly when the HTTPS port is in use', () async {
+      final busy =
+          await ServerSocket.bind(InternetAddress.loopbackIPv4, securePort);
+      try {
+        final result = await run([
+          'serve',
+          _domain,
+          ...acmeOptions(),
+          '--secure-port',
+          '$securePort'
+        ]);
+        expect(result.code, 1);
+        expect(result.err, startsWith('FAIL  '));
+      } finally {
+        await busy.close();
+      }
+    });
+
+    test('serve keeps running when a renewed certificate is unusable',
+        () async {
+      final served =
+          await startServe(['--renew-days', '365', '--renew-interval', '1s']);
+      acme.corruptCertificate = true;
+
+      Future<void> waitFor(bool Function() condition) async {
+        final started = DateTime.now();
+        while (!condition() &&
+            DateTime.now().difference(started) < const Duration(seconds: 30)) {
+          await Future<void>.delayed(const Duration(milliseconds: 100));
+        }
+        expect(condition(), isTrue, reason: '${served.out}\n${served.err}');
+      }
+
+      // The corrupt certificate can't be loaded: the server keeps running
+      // with the previous one instead of restarting.
+      await waitFor(() => '${served.err}'.contains("can't be loaded"));
+      expect('${served.out}', isNot(contains('restarted the server')));
+      expect(await get('/'), 'OK\n');
+
+      acme.corruptCertificate = false;
+      // A later check renews it and restarts with the new certificate.
+      await waitFor(() => '${served.out}'.contains('restarted the server'));
+      expect((await verify()).code, 0);
+
+      shutdown.complete();
+      expect(await served.code, 0);
     });
 
     test('serves a static directory', () async {

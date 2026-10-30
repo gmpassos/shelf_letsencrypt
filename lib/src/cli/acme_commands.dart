@@ -220,7 +220,16 @@ class RotateKeyCommand extends AcmeCommand {
     final domain = domains.single;
     final contact = email;
     final handler = openHandler();
+    final keys = _KeyBackup(handler, domain);
 
+    final leftover = keys.leftover;
+    if (leftover != null) {
+      return _result(
+          domain,
+          false,
+          'A previous rotation was interrupted: rename ${leftover.path} back '
+          '(it matches the stored certificate) or delete it, then retry');
+    }
     final privateKey = handler.fileDomainPrivateKeyPEM(domain);
     if (!privateKey.existsSync()) {
       return _result(
@@ -238,7 +247,6 @@ class RotateKeyCommand extends AcmeCommand {
           "Can't listen on port ${letsEncrypt.port}: ${describeError(e)}");
     }
 
-    final keys = _KeyBackup(handler, domain);
     try {
       keys.moveAside();
       final ok = await letsEncrypt
@@ -282,6 +290,10 @@ class _KeyBackup {
   final List<File> _files;
 
   File _backup(File file) => File('${file.path}.previous');
+
+  /// A backup left by an interrupted rotation, if any.
+  File? get leftover =>
+      _files.map(_backup).where((backup) => backup.existsSync()).firstOrNull;
 
   void moveAside() {
     for (final file in _files) {

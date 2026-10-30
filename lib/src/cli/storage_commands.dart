@@ -108,7 +108,7 @@ class ListCommand extends CliCommand {
 
   @override
   Future<int> run() async {
-    final handler = openHandler();
+    final handler = openReadOnlyHandler();
     final days = intOption('days');
     final now = cli.clock();
     final statuses = (handler.listDomains()..sort())
@@ -169,7 +169,7 @@ class ShowCommand extends CliCommand {
     final domains = domainArguments();
     if (domains.length != 1) usageException('Give exactly one <domain>.');
     final domain = domains.single;
-    final handler = openHandler();
+    final handler = openReadOnlyHandler();
     if (!handler.listDomains().contains(domain)) {
       cli.err.writeln('FAIL  No certificate stored for $domain');
       return 1;
