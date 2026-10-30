@@ -10,6 +10,12 @@
     hard link left at the destination is replaced instead of written through.
   - Configured absolute paths outside the storage directory are unchanged.
   - On Windows, `directory` now also has symbolic links resolved.
+  - If the storage directory is removed and its path now resolves elsewhere,
+    it is no longer re-created at the new location before the error.
+
+- Tests: account-initialization fallback, key/CSR generation and save
+  failures, unloadable certificates after a request or renewal, hard-linked
+  public keys, and linked private-key directories.
 
 ## 2.0.4
 

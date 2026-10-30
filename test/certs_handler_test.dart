@@ -295,11 +295,40 @@ void main() {
         ..writeAsStringSync('sentinel');
       final chain = handler.fileDomainFullChainPEM('a.example.com');
       chain.parent.createSync();
-      Process.runSync('ln', [victim.path, chain.path]);
+      hardLink(victim.path, chain.path);
 
       await handler.saveSignedCertificateChain('a.example.com', ['chain']);
       expect(chain.readAsStringSync(), contains('chain'));
       expect(victim.readAsStringSync(), 'sentinel');
+      expect(chain.parent.listSync(), hasLength(1));
+    }, skip: _posixSkip);
+
+    test('public key replaces a hard-linked destination', () async {
+      final handler = handlerAt('hardlinked-public');
+      final victim = File(pack_path.join(tmpDir.path, 'outside-public.pem'))
+        ..writeAsStringSync('sentinel');
+      final publicKey = handler.fileDomainPublicKeyPEM('a.example.com');
+      publicKey.parent.createSync();
+      hardLink(victim.path, publicKey.path);
+
+      final pair =
+          await handler.generateDomainPEMKeyPair('a.example.com', force: true);
+      expect(publicKey.readAsStringSync(), pair!.publicKeyPEM);
+      expect(victim.readAsStringSync(), 'sentinel');
+    }, skip: _posixSkip);
+
+    test('private key rejects a linked domain directory', () async {
+      final handler = handlerAt('linked-private-parent');
+      final outside = Directory(pack_path.join(tmpDir.path, 'outside-private'))
+        ..createSync();
+      Link(pack_path.join(handler.directory.path, 'a.example.com'))
+          .createSync(outside.path);
+
+      await expectLater(
+          handler.generateDomainPEMKeyPair('a.example.com'),
+          throwsA(isA<FileSystemException>().having(
+              (e) => e.message, 'message', contains('not a directory'))));
+      expect(outside.listSync(), isEmpty);
     }, skip: _posixSkip);
 
     test('external public and chain paths retain their permissions', () async {
@@ -335,6 +364,23 @@ void main() {
       await handler.generateAccountPEMKeyPair();
       expect(handler.fileAccountPrivateKeyPEM().existsSync(), isTrue);
       expect(handler.directory.statSync().mode & 0x3f, 0);
+    }, skip: _posixSkip);
+
+    test('does not re-create a storage directory that has moved', () async {
+      final parent = Directory(pack_path.join(tmpDir.path, 'parent'))
+        ..createSync();
+      final handler = CertificatesHandlerIO(
+          Directory(pack_path.join(parent.path, 'certs')));
+      final elsewhere = Directory(pack_path.join(tmpDir.path, 'elsewhere'))
+        ..createSync();
+      parent.deleteSync(recursive: true);
+      Link(parent.path).createSync(elsewhere.path);
+
+      await expectLater(
+          handler.generateAccountPEMKeyPair(),
+          throwsA(isA<FileSystemException>()
+              .having((e) => e.message, 'message', contains('has moved'))));
+      expect(elsewhere.listSync(), isEmpty);
     }, skip: _posixSkip);
 
     test('rejects storage under a file', () {

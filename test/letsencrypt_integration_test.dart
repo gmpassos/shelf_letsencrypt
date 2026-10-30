@@ -23,12 +23,74 @@ class _TestLetsEncrypt extends LetsEncrypt {
   String get apiBaseURL => acme.baseUrl;
 }
 
+/// A [CertificatesHandlerIO] whose operations can be made to fail.
+class _TestHandler extends CertificatesHandlerIO {
+  _TestHandler(super.directory);
+
+  bool failKeyGeneration = false;
+  bool failCSR = false;
+  bool failSave = false;
+
+  /// When set, the number of [buildSecurityContexts] calls that still build
+  /// contexts; later calls return none.
+  int? securityContextBuilds;
+
+  @override
+  Future<PEMKeyPair?> generateAccountPEMKeyPair({bool force = false}) async =>
+      failKeyGeneration ? null : super.generateAccountPEMKeyPair(force: force);
+
+  @override
+  Future<PEMKeyPair?> generateDomainPEMKeyPair(String cn,
+          {bool force = false}) async =>
+      failKeyGeneration
+          ? null
+          : super.generateDomainPEMKeyPair(cn, force: force);
+
+  @override
+  Future<String?> generateCSR(String cn, String email,
+          {String? organizationName,
+          String? organizationUnit,
+          String? locality,
+          String? state,
+          String? country}) async =>
+      failCSR
+          ? null
+          : super.generateCSR(cn, email,
+              organizationName: organizationName,
+              organizationUnit: organizationUnit,
+              locality: locality,
+              state: state,
+              country: country);
+
+  @override
+  Future<Map<String, SecurityContext>?> buildSecurityContexts(
+      List<Domain> domains,
+      {bool allowUnresolvedDomain = false,
+      bool loadAllHandledDomains = true}) async {
+    final builds = securityContextBuilds;
+    if (builds != null) {
+      securityContextBuilds = builds - 1;
+      if (builds <= 0) return {};
+    }
+    return super.buildSecurityContexts(domains,
+        allowUnresolvedDomain: allowUnresolvedDomain,
+        loadAllHandledDomains: loadAllHandledDomains);
+  }
+
+  @override
+  Future<bool> saveSignedCertificateChain(
+          String cn, List<String> signedCertificatesChain) async =>
+      !failSave &&
+      await super.saveSignedCertificateChain(cn, signedCertificatesChain);
+}
+
 const _domain = Domain(name: 'www.example.com', email: 'admin@example.com');
 const _domain2 = Domain(name: 'api.example.com', email: 'admin@example.com');
 
 void main() {
   late Directory tmpDir;
   late FakeAcmeServer acme;
+  late _TestHandler handler;
   late _TestLetsEncrypt letsEncrypt;
   late List<String> logs;
   final servers = <HttpServer>[];
@@ -49,9 +111,8 @@ void main() {
     acme = FakeAcmeServer(challengePort: port);
     await acme.start();
     logs = [];
-    letsEncrypt = _TestLetsEncrypt(
-        CertificatesHandlerIO(Directory(pack_path.join(tmpDir.path, 'certs'))),
-        acme,
+    handler = _TestHandler(Directory(pack_path.join(tmpDir.path, 'certs')));
+    letsEncrypt = _TestLetsEncrypt(handler, acme,
         port: port,
         securePort: securePort,
         log: (level, message, error, stackTrace) =>
@@ -184,6 +245,44 @@ void main() {
       await http.close();
     });
 
+    test('fails without security contexts when requests are disabled',
+        () async {
+      handler.securityContextBuilds = 0;
+      await expectLater(
+          startServer([_domain], requestCertificate: false),
+          throwsA(isA<StateError>().having((e) => e.message, 'message',
+              contains('No previous `SecurityContext`s'))));
+    });
+
+    test('fails when a requested certificate cannot be loaded', () async {
+      handler.securityContextBuilds = 0;
+      await expectLater(
+          startServer([_domain]),
+          throwsA(isA<StateError>().having((e) => e.message, 'message',
+              contains('after successful request of certificates'))));
+      expect(acme.certificatesIssued, equals(1));
+    });
+
+    test('fails when a renewed certificate cannot be loaded', () async {
+      await startServer([_domain]);
+      await closeServers();
+
+      handler.securityContextBuilds = 1;
+      await expectLater(
+          startServer([_domain], forceRequestCertificate: true),
+          throwsA(isA<StateError>().having((e) => e.message, 'message',
+              contains('after successful certificate check'))));
+      expect(acme.certificatesIssued, equals(2));
+    });
+
+    test('fails when the certificate cannot be saved', () async {
+      handler.failSave = true;
+      await expectLater(
+          startServer([_domain]),
+          throwsA(isA<StateError>().having((e) => e.message, 'message',
+              contains('Error requesting certificate'))));
+    });
+
     test('fails and releases its ports when the request fails', () async {
       acme.rejectNewOrder = true;
       await expectLater(startServer([_domain]), throwsStateError);
@@ -237,7 +336,7 @@ void main() {
     }
 
     test('recovers when the client initialization fails', () async {
-      acme.breakNextAccountRequest = true;
+      acme.brokenAccountRequests = 1;
       final server = await serveChallenges();
       try {
         expect(await letsEncrypt.requestCertificate(_domain), isTrue);
@@ -247,9 +346,57 @@ void main() {
       expect(logs, contains(contains('Trying initialization fallback')));
     });
 
+    test('creates an account when the fallback lookup fails', () async {
+      acme.brokenAccountRequests = 2;
+      final server = await serveChallenges();
+      try {
+        expect(await letsEncrypt.requestCertificate(_domain), isTrue);
+      } finally {
+        await server.close(force: true);
+      }
+      expect(logs, contains(contains('Creating account')));
+    });
+
     test('fails without an account', () async {
       acme.rejectAccounts = true;
       await expectFailure(contains("Can't initialize account"));
+    });
+
+    test('fails when the fallback account creation fails', () async {
+      acme.brokenAccountRequests = 3;
+      await expectFailure(contains("Can't initialize account"));
+    });
+
+    test('fails when the account key pair cannot be generated', () async {
+      handler.failKeyGeneration = true;
+      await expectLater(
+          letsEncrypt.requestCertificate(_domain),
+          throwsA(isA<StateError>().having((e) => e.message, 'message',
+              contains("Can't generate account key pair"))));
+    });
+
+    test('fails when the domain key pair cannot be generated', () async {
+      await handler.ensureAccountPEMKeyPair();
+      handler.failKeyGeneration = true;
+      await expectLater(
+          letsEncrypt.requestCertificate(_domain),
+          throwsA(isA<StateError>().having((e) => e.message, 'message',
+              contains("Can't generate domain key pair"))));
+    });
+
+    test('fails when the CSR cannot be generated', () async {
+      handler.failCSR = true;
+      await expectLater(
+          letsEncrypt.requestCertificate(_domain),
+          throwsA(isA<StateError>().having(
+              (e) => e.message, 'message', contains("Can't generate CSR"))));
+    });
+
+    test('rejects an invalid domain name', () async {
+      await expectLater(
+          letsEncrypt.requestCertificate(
+              const Domain(name: '../outside', email: 'admin@example.com')),
+          throwsArgumentError);
     });
 
     test('fails without an ACME directory', () async {

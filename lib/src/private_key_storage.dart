@@ -42,7 +42,9 @@ final class PrivateKeyStorage {
   Directory get root => Directory(_rootPath);
 
   /// Creates or secures the root at [path] and returns its resolved path.
-  String _prepareRoot(String path) {
+  /// With [expected], fails before creating anything if [path] would resolve
+  /// elsewhere.
+  String _prepareRoot(String path, {String? expected}) {
     final missing = <String>[];
     var existing = path;
     while (FileSystemEntity.typeSync(existing, followLinks: false) ==
@@ -57,6 +59,10 @@ final class PrivateKeyStorage {
     // The managed root itself may be an old 0755 store that needs migration.
     // Its parent and all higher ancestors must already be trusted.
     var current = _resolveTrustedPath(existing, exempt: missing.isEmpty);
+    if (expected != null &&
+        p.joinAll([current, ...missing.reversed]) != expected) {
+      throw FileSystemException('Storage root has moved', expected);
+    }
     for (final component in missing.reversed) {
       current = p.join(current, component);
       _posix!.mkdir(current, _ownerOnlyDirectory);
@@ -71,9 +77,7 @@ final class PrivateKeyStorage {
   void _secureRoot() {
     if (FileSystemEntity.typeSync(_rootPath, followLinks: false) ==
         FileSystemEntityType.notFound) {
-      if (_prepareRoot(_rootPath) != _rootPath) {
-        throw FileSystemException('Storage root has moved', _rootPath);
-      }
+      _prepareRoot(_rootPath, expected: _rootPath);
     } else {
       _secureOwnedDirectory(_rootPath);
     }

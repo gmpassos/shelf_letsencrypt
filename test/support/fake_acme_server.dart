@@ -22,9 +22,9 @@ class FakeAcmeServer {
   /// `newAccount` fails with `400` (the account can't be created or found).
   bool rejectAccounts = false;
 
-  /// The next `newAccount` fails with `400` and no `Replay-Nonce`, which makes
-  /// `AcmeClient.init` throw.
-  bool breakNextAccountRequest = false;
+  /// The number of next `newAccount` requests answered without a
+  /// `Replay-Nonce`, which makes `AcmeClient` throw.
+  int brokenAccountRequests = 0;
 
   /// `newOrder` fails with `403`.
   bool rejectNewOrder = false;
@@ -105,9 +105,10 @@ class FakeAcmeServer {
   }
 
   Response _account(_Jws jws) {
-    if (breakNextAccountRequest) {
-      breakNextAccountRequest = false;
-      return Response(400, body: '{"type":"broken"}');
+    if (brokenAccountRequests > 0) {
+      brokenAccountRequests--;
+      return Response.ok('{"status":"valid"}',
+          headers: {'Content-Type': 'application/json'});
     }
 
     final key = jws.protected['jwk']?['n'] as String?;
