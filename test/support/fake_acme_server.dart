@@ -41,6 +41,9 @@ class FakeAcmeServer {
   /// The certificate download fails with `500`.
   bool rejectCertificate = false;
 
+  /// The certificate download returns a PEM block that is not a certificate.
+  bool corruptCertificate = false;
+
   /// The number of certificates issued.
   int certificatesIssued = 0;
 
@@ -179,7 +182,10 @@ class FakeAcmeServer {
 
   Response _certificate(_Order order) {
     if (rejectCertificate) return _error(500, 'serverInternal');
-    return Response.ok(order.certificatePem, headers: {
+    final pem = corruptCertificate
+        ? '-----BEGIN CERTIFICATE-----\nAAAA\n-----END CERTIFICATE-----\n'
+        : order.certificatePem;
+    return Response.ok(pem, headers: {
       ..._nonceHeader(),
       'Content-Type': 'application/pem-certificate-chain',
     });

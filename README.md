@@ -48,6 +48,11 @@ protection. If an existing store has a different owner, a symlinked key, or an
 external hard link, construction or key loading fails so the operator can
 migrate it deliberately.
 
+To check a directory before starting the server, run
+`shelf_letsencrypt check --dir <path>` as the service user (see
+[Command-line tool](#command-line-tool)). It applies the same checks without
+changing anything.
+
 Certificate domain names must be ASCII DNS names with at least two labels.
 Each label must be 1–63 letters, digits, or hyphens and start and end with a
 letter or digit, and the last label must contain a letter. This accepts
@@ -265,6 +270,67 @@ The example includes a renewal service that does a daily check if any certificat
 need renewing.
 If a cert needs to be renewed, it will renew it and then gracefully restart
 the server with the new certs.
+
+Alternatively, run `shelf_letsencrypt renew` from cron, with hooks that stop
+and restart your server (see below).
+
+# Command-line tool
+
+The package includes `shelf_letsencrypt`, a tool to inspect and manage the
+certificates directory used by `CertificatesHandlerIO`:
+
+```bash
+dart pub global activate shelf_letsencrypt
+shelf_letsencrypt --dir /var/lib/myapp/certs list
+```
+
+| Command | Description |
+|---|---|
+| `check [--fix]` | Checks the directory and its keys like the server does at startup. Read-only unless `--fix` is given. |
+| `list [--days 30]` | Lists the stored domains, when their certificates expire, and their status: `ok`, `expiring`, `expired`, `missing` or `invalid`. |
+| `show <domain>` | Shows a stored certificate (names, issuer, validity) and the permissions of its files. |
+| `request <domain>... --email <e>` | Requests certificates for domains that have none or whose certificate expires within `--days`. Skips valid certificates unless `--force` is given. |
+| `renew [<domain>...] --email <e>` | Renews the certificates that expire within `--days` (all stored domains by default). `--dry-run` only lists them. `--pre-hook <command>` runs first when a certificate is due (e.g. to stop the server holding port 80), and `--post-hook <command>` afterwards (e.g. to start it again). |
+| `rotate-key <domain> --email <e>` | Generates a new private key and requests a certificate for it. The previous key and certificate are restored if the request fails. |
+| `verify <domain>...` | Connects to the live HTTPS server and checks that its certificate is not close to expiry (`--days 5`) and, with `--dir`, that it is the stored one. `--connect <address>` tests a specific server. |
+| `serve <domain>... --email <e>` | Runs an HTTPS server with automatic certificates and renewals, serving `--static <dir>` or an "OK" page. It restarts only for a renewed certificate that loads, and keeps serving the previous one otherwise. |
+
+`check`, `list`, `show` and `verify` never create or change files.
+
+Global options:
+
+- `--dir`, `-d`: the certificates directory, or `$SHELF_LETSENCRYPT_DIR`.
+- `--json`: print the result as JSON.
+- `--verbose`, `-v`: print the library log, including the ACME exchange, to
+  stderr.
+- `--account-dir`, `--private-key-file`, `--public-key-file`,
+  `--fullchain-file`: for a handler created with non-default names.
+
+Exit codes: `0` success, `1` failure (a failed check, request or
+verification), `64` usage error.
+
+Notes:
+
+- The commands that talk to Let's Encrypt (`request`, `renew`, `rotate-key`,
+  `serve`) use the **staging** API unless `--production` is given: staging
+  certificates are not trusted by browsers, but staging has much higher
+  rate limits.
+- `request`, `renew` and `rotate-key` answer the HTTP-01 challenge themselves
+  on `--port` (default `80`), so nothing else may listen on it. Let's Encrypt
+  always connects to port 80; use a NAT or a redirect for another port.
+- Run the tool as the user the server runs as: the storage checks compare
+  owners with the user running them.
+- A running server does not reload a certificate renewed by the tool, and it
+  holds port 80. With `renew`, use `--pre-hook` to stop it and `--post-hook`
+  to start it again; the post-hook also runs if the renewal fails. Both run
+  only when a certificate is due. Then use `verify` to check the result.
+
+A daily renewal with cron, as the service user (the hooks need a sudoers rule
+allowing it to stop and start the service):
+
+```bash
+0 3 * * * shelf_letsencrypt --dir /var/lib/myapp/certs renew --email admin@example.com --production --pre-hook 'sudo systemctl stop myapp' --post-hook 'sudo systemctl start myapp'
+```
 
 ## Source
 
