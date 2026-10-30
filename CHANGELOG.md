@@ -1,3 +1,13 @@
+## 2.0.8
+
+- Fix: the library compiles for the web again (broken since 2.0.4): the
+  `dart:ffi` POSIX calls of the private-key storage are behind a conditional
+  import (`if (dart.library.ffi)`), with a stub otherwise. A package importing
+  `shelf_letsencrypt` from code also compiled with dart2js (like `bones_api`'s
+  browser tests) failed with `Dart library 'dart:ffi' is not available on
+  this platform`.
+- Tests: the library compiles with dart2js.
+
 ## 2.0.7
 
 - CLI: an error without a path no longer prints a trailing `: `.
