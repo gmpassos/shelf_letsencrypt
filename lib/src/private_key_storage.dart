@@ -150,7 +150,7 @@ final class PrivateKeyStorage {
   void _preparePrivateParent(Directory parent) {
     final posix = _posix!;
     final parentPath = p.normalize(parent.absolute.path);
-    if (parentPath == _rootPath || p.isWithin(_rootPath, parentPath)) {
+    if (_isManaged(parentPath)) {
       _secureRoot();
       var current = _rootPath;
       final relative = p.relative(parentPath, from: _rootPath);
@@ -189,11 +189,12 @@ final class PrivateKeyStorage {
   /// cannot pass through a link left in an older certificate store. Configured
   /// external paths remain the operator's responsibility and retain their
   /// existing creation and permission behavior.
-  void preparePublicParent(Directory parent) {
+  /// Returns whether [parent] is managed, i.e. the root or inside it.
+  bool _preparePublicParent(Directory parent) {
     final parentPath = p.normalize(parent.absolute.path);
-    if (parentPath != _rootPath && !p.isWithin(_rootPath, parentPath)) {
+    if (!_isManaged(parentPath)) {
       parent.createSync(recursive: true);
-      return;
+      return false;
     }
 
     if (_posix == null) {
@@ -211,7 +212,7 @@ final class PrivateKeyStorage {
 
     var current = _rootPath;
     final relative = p.relative(parentPath, from: _rootPath);
-    if (relative == '.') return;
+    if (relative == '.') return true;
     for (final component in p.split(relative)) {
       current = p.join(current, component);
       final type = FileSystemEntity.typeSync(current, followLinks: false);
@@ -232,6 +233,44 @@ final class PrivateKeyStorage {
               'Certificate parent has an unsafe owner or type', current);
         }
       }
+    }
+    return true;
+  }
+
+  /// Prepares the parent of a public key or certificate chain and checks that
+  /// [target] is absent or a regular file. Returns whether [target] is managed.
+  bool preparePublicTarget(File target, String description) {
+    final managed = _preparePublicParent(target.parent);
+    final type = FileSystemEntity.typeSync(target.path, followLinks: false);
+    if (type != FileSystemEntityType.notFound &&
+        type != FileSystemEntityType.file) {
+      throw FileSystemException(
+          '$description destination is not a regular file', target.path);
+    }
+    return managed;
+  }
+
+  bool _isManaged(String path) =>
+      path == _rootPath || p.isWithin(_rootPath, path);
+
+  /// Writes a public key or certificate chain. Inside the storage root the
+  /// content is staged and renamed over [target], so a hard link left in an
+  /// older store is replaced rather than written through. Configured external
+  /// paths are written in place and keep their existing permissions.
+  void writePublic(File target, String content, String description) {
+    if (!preparePublicTarget(target, description)) {
+      target.writeAsStringSync(content);
+      return;
+    }
+    final random = Random.secure();
+    final staging = File(p.join(target.parent.path,
+        '.${p.basename(target.path)}.${random.nextInt(1 << 32)}.tmp'));
+    staging.createSync(exclusive: true);
+    try {
+      staging.writeAsStringSync(content, flush: true);
+      staging.renameSync(target.path);
+    } finally {
+      if (staging.existsSync()) staging.deleteSync();
     }
   }
 

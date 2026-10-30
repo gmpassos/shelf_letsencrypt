@@ -289,6 +289,19 @@ void main() {
       expect(victim.readAsStringSync(), 'sentinel');
     }, skip: _posixSkip);
 
+    test('certificate chain replaces a hard-linked destination', () async {
+      final handler = handlerAt('hardlinked-chain');
+      final victim = File(pack_path.join(tmpDir.path, 'outside-hardlink.pem'))
+        ..writeAsStringSync('sentinel');
+      final chain = handler.fileDomainFullChainPEM('a.example.com');
+      chain.parent.createSync();
+      Process.runSync('ln', [victim.path, chain.path]);
+
+      await handler.saveSignedCertificateChain('a.example.com', ['chain']);
+      expect(chain.readAsStringSync(), contains('chain'));
+      expect(victim.readAsStringSync(), 'sentinel');
+    }, skip: _posixSkip);
+
     test('external public and chain paths retain their permissions', () async {
       final publicDir = Directory(pack_path.join(tmpDir.path, 'public'))
         ..createSync();

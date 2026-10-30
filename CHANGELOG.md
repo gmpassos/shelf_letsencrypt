@@ -1,3 +1,16 @@
+## 2.0.5
+
+- Security: `CertificatesHandlerIO` no longer follows symbolic links or
+  junctions inside the storage directory when writing public keys and
+  certificate chains. A link left in an older, writable store could previously
+  redirect these writes outside it.
+  - Directories on the managed path must be real directories owned by the
+    service user; missing ones are created `0700`.
+  - Managed public keys and chains are staged and renamed into place, so a
+    hard link left at the destination is replaced instead of written through.
+  - Configured absolute paths outside the storage directory are unchanged.
+  - On Windows, `directory` now also has symbolic links resolved.
+
 ## 2.0.4
 
 - Security: validate certificate domain names before building filesystem paths
