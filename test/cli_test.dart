@@ -3,7 +3,10 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:path/path.dart' as pack_path;
+import 'package:shelf/shelf.dart';
+import 'package:shelf/shelf_io.dart' as shelf_io;
 import 'package:shelf_letsencrypt/shelf_letsencrypt.dart';
+import 'package:shelf_letsencrypt/src/cli/acme_commands.dart';
 import 'package:shelf_letsencrypt/src/cli/cli.dart';
 import 'package:test/test.dart';
 
@@ -40,7 +43,9 @@ void main() {
   late FakeAcmeServer acme;
   late int port;
   late int securePort;
-  late Completer<void> shutdown;
+
+  /// Stops `serve`, like a signal.
+  late StreamController<ProcessSignal> shutdown;
 
   setUpAll(() => HttpOverrides.global = LoopbackHttpOverrides());
   tearDownAll(() => HttpOverrides.global = null);
@@ -57,11 +62,11 @@ void main() {
     } while (securePort == port);
     acme = FakeAcmeServer(challengePort: port);
     await acme.start();
-    shutdown = Completer<void>();
+    shutdown = StreamController<ProcessSignal>.broadcast();
   });
 
   tearDown(() async {
-    if (!shutdown.isCompleted) shutdown.complete();
+    await shutdown.close();
     await acme.close();
     tmpDir.deleteSync(recursive: true);
   });
@@ -70,7 +75,7 @@ void main() {
       ShelfLetsEncryptCli(
           out: out,
           err: err,
-          waitForShutdown: () => shutdown.future,
+          shutdownSignals: () => [shutdown.stream],
           letsEncrypt: (handler,
                   {required port,
                   required securePort,
@@ -105,6 +110,51 @@ void main() {
 
   Map<String, dynamic> decode(String json) =>
       jsonDecode(json) as Map<String, dynamic>;
+
+  group('defaults', () {
+    test('uses stdout, stderr and the real LetsEncrypt', () async {
+      await storeSelfSignedCertificate(handler(), _domain);
+      final busy = await ServerSocket.bind(InternetAddress.loopbackIPv4, port);
+      try {
+        // Fails binding the challenge port, before any ACME request.
+        final code = await ShelfLetsEncryptCli()
+            .run(['--dir', certsDir, 'rotate-key', _domain, ...acmeOptions()]);
+        expect(code, 1);
+      } finally {
+        await busy.close();
+      }
+    });
+
+    test('stops on SIGINT, and SIGTERM except on Windows', () {
+      // The test runner handles these signals itself: don't listen.
+      expect(ShelfLetsEncryptCli.processShutdownSignals(),
+          hasLength(Platform.isWindows ? 1 : 2));
+    });
+
+    test('waits for the first signal, then stops listening', () async {
+      final sigint = StreamController<ProcessSignal>();
+      final sigterm = StreamController<ProcessSignal>();
+      final stopped =
+          ShelfLetsEncryptCli.waitForSignals([sigint.stream, sigterm.stream]);
+      expect(sigint.hasListener, isTrue);
+
+      sigterm.add(ProcessSignal.sigterm);
+      sigint.add(ProcessSignal.sigint);
+      await stopped;
+      expect(sigint.hasListener, isFalse);
+      expect(sigterm.hasListener, isFalse);
+    });
+
+    test('describes errors in one line', () {
+      expect(describeError(const FileSystemException('Denied', '/x')),
+          'Denied: /x');
+      expect(describeError(const FileSystemException('Denied')), 'Denied');
+      expect(describeError(StateError('Broken')), 'Broken');
+      expect(describeError(ArgumentError('Bad')), 'Bad');
+      expect(describeError(const SocketException('Refused')), 'Refused');
+      expect(describeError(TimeoutException('Slow')), contains('Slow'));
+    });
+  });
 
   group('usage', () {
     test('prints help for every command', () async {
@@ -583,7 +633,7 @@ void main() {
       expect('$out', contains('Serving https://$_domain:$securePort/'),
           reason: '$err');
       addTearDown(() async {
-        if (!shutdown.isCompleted) shutdown.complete();
+        shutdown.add(ProcessSignal.sigint);
         await code;
       });
       return (code: code, out: out, err: err);
@@ -628,7 +678,7 @@ void main() {
       expect(untrusted.code, 1);
       expect(untrusted.out, contains('TLS handshake failed'));
 
-      shutdown.complete();
+      shutdown.add(ProcessSignal.sigint);
       expect(await served.code, 0);
       expect('${served.out}', contains('Stopped'));
     });
@@ -726,15 +776,78 @@ void main() {
       await waitFor(() => '${served.out}'.contains('restarted the server'));
       expect((await verify()).code, 0);
 
-      shutdown.complete();
+      shutdown.add(ProcessSignal.sigint);
       expect(await served.code, 0);
     });
 
     test('serves a static directory', () async {
       final site = Directory(pack_path.join(tmpDir.path, 'site'))..createSync();
       File(pack_path.join(site.path, 'index.html')).writeAsStringSync('home');
-      await startServe(['--static', site.path]);
+      await startServe(['--static', site.path, '--renew-interval', '1d']);
       expect(await get('/'), 'home');
+    });
+
+    test('serve keeps running when a renewal fails', () async {
+      final served =
+          await startServe(['--renew-days', '365', '--renew-interval', '1s']);
+      acme.rejectFinalize = true;
+      final started = DateTime.now();
+      while (!'${served.err}'.contains('FAIL  renewing $_domain') &&
+          DateTime.now().difference(started) < const Duration(seconds: 30)) {
+        await Future<void>.delayed(const Duration(milliseconds: 100));
+      }
+      expect('${served.err}', contains('FAIL  renewing $_domain'));
+      expect(await get('/'), 'OK\n');
+    });
+
+    test('verify reports an expired certificate', () async {
+      final expired = selfSignedCertificate(_domain, days: -1);
+      final context = SecurityContext()
+        ..useCertificateChainBytes(utf8.encode(expired.certificatePEM))
+        ..usePrivateKeyBytes(utf8.encode(expired.privateKeyPEM));
+      final server = await shelf_io.serve(
+          (request) => Response.ok('expired'), '127.0.0.1', securePort,
+          securityContext: context);
+      try {
+        final result = await verify();
+        expect(result.code, 1);
+        expect(result.out, contains('FAIL  $_domain: Certificate expired on'));
+      } finally {
+        await server.close(force: true);
+      }
+    });
+
+    test('the challenge server answers challenges and self-checks', () async {
+      final letsEncrypt = _TestLetsEncrypt(handler(), acme,
+          port: port,
+          securePort: securePort,
+          bindingAddress: '127.0.0.1',
+          production: false);
+      final server = await RequestCommand(cli(StringBuffer(), StringBuffer()),
+              renew: false)
+          .serveChallenges(letsEncrypt);
+      Future<(int, String)> fetch(String path) async {
+        final client = HttpClient();
+        try {
+          final response = await (await client
+                  .getUrl(Uri.parse('http://$_domain:$port$path')))
+              .close();
+          return (
+            response.statusCode,
+            await response.transform(utf8.decoder).join()
+          );
+        } finally {
+          client.close(force: true);
+        }
+      }
+
+      try {
+        expect(await fetch('/.well-known/check/1'), (200, 'OK'));
+        expect((await fetch('/.well-known/acme-challenge/x')).$1, 404);
+        expect((await fetch('/other')).$1, 404);
+      } finally {
+        await server.close(force: true);
+      }
     });
 
     test('renews while serving', () async {

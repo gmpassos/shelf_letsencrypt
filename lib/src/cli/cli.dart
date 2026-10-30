@@ -32,12 +32,12 @@ class ShelfLetsEncryptCli {
       {StringSink? out,
       StringSink? err,
       LetsEncryptFactory? letsEncrypt,
-      Future<void> Function()? waitForShutdown,
+      List<Stream<ProcessSignal>> Function()? shutdownSignals,
       DateTime Function()? clock})
       : out = out ?? stdout,
         err = err ?? stderr,
         letsEncrypt = letsEncrypt ?? _defaultLetsEncrypt,
-        waitForShutdown = waitForShutdown ?? _waitForSignal,
+        shutdownSignals = shutdownSignals ?? processShutdownSignals,
         clock = clock ?? DateTime.now;
 
   /// The environment variable used when `--dir` is not given.
@@ -47,9 +47,12 @@ class ShelfLetsEncryptCli {
   final StringSink err;
   final LetsEncryptFactory letsEncrypt;
 
-  /// Completes when `serve` should stop. Defaults to `SIGINT` or `SIGTERM`.
-  final Future<void> Function() waitForShutdown;
+  /// The signals that stop `serve`. See [processShutdownSignals].
+  final List<Stream<ProcessSignal>> Function() shutdownSignals;
   final DateTime Function() clock;
+
+  /// Completes on the first of [shutdownSignals].
+  Future<void> waitForShutdown() => waitForSignals(shutdownSignals());
 
   late final CommandRunner<int> runner = _Runner(this)
     ..argParser.addOption('dir',
@@ -110,17 +113,25 @@ class ShelfLetsEncryptCli {
           production: production,
           log: log);
 
-  static Future<void> _waitForSignal() {
+  /// The signals that stop `serve`: `SIGINT`, and `SIGTERM` except on Windows.
+  /// Nothing is watched until the streams are listened to.
+  static List<Stream<ProcessSignal>> processShutdownSignals() => [
+        ProcessSignal.sigint.watch(),
+        if (!Platform.isWindows) ProcessSignal.sigterm.watch()
+      ];
+
+  /// Completes on the first event of any of [signals], then stops listening
+  /// to them so that the default signal handlers apply again.
+  static Future<void> waitForSignals(List<Stream<ProcessSignal>> signals) {
     final stop = Completer<void>();
     final subscriptions = [
-      ProcessSignal.sigint,
-      if (!Platform.isWindows) ProcessSignal.sigterm
-    ].map((signal) => signal.watch().listen((_) {
+      for (final signal in signals)
+        signal.listen((_) {
           if (!stop.isCompleted) stop.complete();
-        }));
-    final active = subscriptions.toList();
+        })
+    ];
     return stop.future.whenComplete(() {
-      for (final subscription in active) {
+      for (final subscription in subscriptions) {
         subscription.cancel();
       }
     });
@@ -141,7 +152,8 @@ class _Runner extends CommandRunner<int> {
 
 /// A one-line description of [error] for the user.
 String describeError(Object error) => switch (error) {
-      FileSystemException(:final message, :final path?) => '$message: $path',
+      FileSystemException(:final message, :final path?) when path.isNotEmpty =>
+        '$message: $path',
       FileSystemException(:final message) => message,
       StateError(:final message) => message,
       ArgumentError(:final message) => '$message',
