@@ -7,6 +7,7 @@
   browser tests) failed with `Dart library 'dart:ffi' is not available on
   this platform`.
 - Tests: the library compiles with dart2js.
+- CI: tests on Windows too.
 
 ## 2.0.7
 
