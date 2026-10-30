@@ -2,7 +2,8 @@
 
 - Fix: the library compiles for the web again (broken since 2.0.4): the
   `dart:ffi` POSIX calls of the private-key storage are behind a conditional
-  import (`if (dart.library.ffi)`), with a stub otherwise. A package importing
+  import (`if (dart.library.ffi)`). Without it (the web) `Posix.current()` is
+  `null`, as on Windows: POSIX modes are not applied. A package importing
   `shelf_letsencrypt` from code also compiled with dart2js (like `bones_api`'s
   browser tests) failed with `Dart library 'dart:ffi' is not available on
   this platform`.

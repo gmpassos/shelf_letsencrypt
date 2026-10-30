@@ -1,11 +1,11 @@
 import 'posix_stat.dart';
 
-/// Without `dart:ffi` (the web): no private-key storage backend.
+/// Without `dart:ffi` (the web): no POSIX calls.
 final class Posix {
   Posix._();
 
-  static Posix? current() =>
-      throw UnsupportedError('CertificatesHandlerIO requires `dart:ffi`');
+  /// Always `null`: like Windows, POSIX modes are not applied.
+  static Posix? current() => null;
 
   int get euid => throw UnsupportedError('No `dart:ffi`');
 
