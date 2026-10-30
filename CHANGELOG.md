@@ -1,3 +1,10 @@
+## 2.0.7
+
+- CLI: an error without a path no longer prints a trailing `: `.
+- Tests: the CLI defaults (stdout, stderr, `LetsEncrypt`, shutdown signals),
+  the challenge server, an expired served certificate, and a renewal failing
+  while serving. Line coverage from 94.2% to 95.8%.
+
 ## 2.0.6
 
 - New command-line tool `shelf_letsencrypt` (see the README):
