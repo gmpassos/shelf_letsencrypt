@@ -216,10 +216,14 @@ void main() {
       final result = await run(['check']);
       expect(result.code, 0);
       // The reported path has symbolic links resolved (`/var` on macOS).
+      // On Windows: a drive path and no POSIX mode.
       expect(
           result.out,
-          matches(
-              RegExp(r'change  Create /.*certs \(0700\)', multiLine: true)));
+          matches(RegExp(
+              Platform.isWindows
+                  ? r'change  Create [A-Za-z]:\\.*certs$'
+                  : r'change  Create /.*certs \(0700\)',
+              multiLine: true)));
       expect(Directory(certsDir).existsSync(), isFalse);
     });
 
